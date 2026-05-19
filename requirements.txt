@@ -1,9 +1,3 @@
 streamlit
-    pandas
-    fpdf2
-    ```
-  
-
-  
-    1. Create another **New File** and name it: `app.py`
-    2. Paste the updated MVP code below. This version includes the mock database, the cascading logic, *and* a new PDF generation engine using `fpdf2`.
+pandas
+fpdf2
