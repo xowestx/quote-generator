@@ -6,15 +6,14 @@ from fpdf import FPDF
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
-# REPLACE THIS URL with your actual Google Sheets share link
-# Ensure your Google Sheet is set to "Anyone with the link can view"
-GSHEET_URL = "https://docs.google.com/spreadsheets/d/1u6r7VpD793X0S0X7mZInwWf0Lg_9EmsF_XGk5_RkIcs/edit?usp=sharing"
+# Directly linked to your provided O West Extra Works data model spreadsheet
+GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=600)  # Caches the data for 10 minutes to maintain fast reload speeds
+@st.cache_data(ttl=300)  # Caches the data for 5 minutes to keep interface switches instant
 def load_all_tabs(base_url):
     """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
-        # Extract the core spreadsheet ID from the sharing URL
+        # Extract the core spreadsheet ID from your active sharing URL
         sheet_id = base_url.split("/d/")[1].split("/")[0]
         
         # Build direct CSV export URLs using the specific tab names from your spreadsheet
@@ -31,9 +30,14 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
+        # Basic cleanup: Strip any trailing white spaces from critical key columns
+        facts['Unit_ID'] = facts['Unit_ID'].astype(str).str.strip()
+        facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
+        products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
+        
         return facts, products, rates, clients, terms
     except Exception as e:
-        st.error(f"Error accessing Google Sheet tabs. Please check share settings. Details: {e}")
+        st.error(f"Error accessing Google Sheet tabs. Please verify share settings are set to 'Anyone with link can view'. Details: {e}")
         return None, None, None, None, None
 
 # Load the database sheets into the run environment
@@ -49,7 +53,7 @@ if 'staged_items' not in st.session_state:
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 st.title("🏗️ Extra Works Quotation Engine")
 
-if df_fact is not None:
+if df_fact is not None and not df_fact.empty:
     # --- FIELD SECTION 1: UNIT & CLIENT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
@@ -62,7 +66,7 @@ if df_fact is not None:
         
     with col_u2:
         # Automatically pull associated Client Name if it matches our client registry table, else allow manual input
-        matched_client = df_clients[df_clients['Unit_ID'] == selected_unit]
+        matched_client = df_clients[df_clients['Unit_ID'].astype(str).str.strip() == str(selected_unit).strip()]
         default_client_name = matched_client['Client Name'].values[0] if not matched_client.empty else ""
         client_name = st.text_input("Client Name Reference", value=default_client_name)
 
@@ -79,12 +83,11 @@ if df_fact is not None:
     st.subheader("2. Add Engineering Option Scope")
     
     # Cascade Filter Level 1: Filter products by current structural property type configuration match
-    active_unit_type = unit_meta['Unit Type']
-    filtered_catalog_by_type = df_products[df_products['Unit Type'].str.strip().str.upper() == str(active_unit_type).strip().str.upper()]
+    active_unit_type = str(unit_meta['Unit Type']).strip().upper()
+    filtered_catalog_by_type = df_products[df_products['Unit Type'].astype(str).str.strip().str.upper() == active_unit_type]
     
     if filtered_catalog_by_type.empty:
-        st.warning(f"No specific configuration architectural variants registered for structural type: '{active_unit_type}'")
-        # Fallback loop to full catalog to avoid deadlocks during staging adjustments
+        st.warning(f"No entry found matching exactly '{unit_meta['Unit Type']}' in PRODUCTS sheet. Showing full list as fallback.")
         filtered_catalog_by_type = df_products
 
     col_p1, col_p2, col_p3 = st.columns(3)
@@ -100,18 +103,30 @@ if df_fact is not None:
         
     with col_p3:
         # Dynamically draw corresponding financing terms rate multipliers matched via structural scope category
-        category_rates = df_rates[df_rates['Category'] == chosen_cat]
-        chosen_term_option = st.selectbox("Financing & Installment Structural Plan", category_rates['Options'].unique())
+        category_rates = df_rates[df_rates['Category'].astype(str).str.strip().str.upper() == str(chosen_cat).strip().str.upper()]
+        if category_rates.empty:
+            category_rates = df_rates
+        chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates['Options'].unique())
         rate_record = category_rates[category_rates['Options'] == chosen_term_option].iloc[0]
 
     # --- CALCULATION LOGIC ENGINE ---
-    target_item_area = float(product_record.get('Area (sqm)', 0))
-    unit_base_cost_rate = float(rate_record.get('Rate (per sqm)', 0))
+    try:
+        target_item_area = float(product_record.get('Area (sqm)', 0))
+    except:
+        target_item_area = 0.0
+        
+    try:
+        # Clean currency characters if present
+        rate_val = str(rate_record.get('Rate (per sqm)', 0)).replace(',', '').replace('$', '').strip()
+        unit_base_cost_rate = float(rate_val)
+    except:
+        unit_base_cost_rate = 0.0
+        
     calculated_line_item_total = target_item_area * unit_base_cost_rate
 
     st.info(f"📐 **Calculation Run Logic:** {target_item_area} sqm (Product Area Block) × {unit_base_cost_rate:,.2f} EGP (Rate Scale Factor) = **{calculated_line_item_total:,.2f} EGP**")
 
-    if st.button("➕ Stage Engineering Line Item to Scope Summary", type="secondary"):
+    if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
         st.session_state.staged_items.append({
             'Product ID': product_record['Product ID'],
             'Category': chosen_cat,
@@ -185,7 +200,7 @@ if df_fact is not None:
             # Extract unique term options pulled into current calculation sheet matrix
             processed_legal_terms = summary_df['Financing Options'].unique()
             for rule_term in processed_legal_terms:
-                matched_legal_text_blocks = df_terms[df_terms['Options'] == rule_term]['TERM'].values
+                matched_legal_text_blocks = df_terms[df_terms['Options'].astype(str).str.strip() == str(rule_term).strip()]['TERM'].values
                 if len(matched_legal_text_blocks) > 0:
                     pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                     pdf.ln(2)
