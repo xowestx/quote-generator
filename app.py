@@ -63,10 +63,16 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
+        # Match client data dynamically by row position index
         client_unit_col = df_clients.columns[2] if len(df_clients.columns) > 2 else df_clients.columns[-1]
         matched_client = df_clients[df_clients[client_unit_col] == selected_unit]
-        default_client_name = matched_client.iloc[0].values[0] if not matched_client.empty else ""
-        client_name = st.text_input("Client Name Reference", value=str(default_client_name))
+        
+        db_client_name = ""
+        if not matched_client.empty:
+            db_client_name = matched_client.iloc[0].values[0]
+            
+        # Keep the reference input field fully editable
+        client_name = st.text_input("Client Name Reference", value=str(db_client_name))
 
     # Metric Panel Context Display (Safe positional mapping)
     m1, m2, m3, m4 = st.columns(4)
@@ -77,14 +83,13 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
-    # --- SECTION 2: CASCADING ARCHITECTURAL SELECTION ENGINE ---
+    # --- SECTION 2: REVERSED CASCADING SELECTION ENGINE ---
     st.subheader("2. Add Engineering Option Scope")
     
-    # Cascade Level 1: Filter full catalog by matching properties with active Asset Unit Type
     active_unit_type = str(unit_meta.values[4] if len(unit_meta) > 4 else "").strip().upper()
     prod_type_col = df_products.columns[2] if len(df_products.columns) > 2 else df_products.columns[0]
     
-    # Safe multi-match string lookups for cases where types are comma-separated (e.g. Townhouse Middle, Townhouse Corner)
+    # Safe multi-match lookup for comma-separated property types
     filtered_catalog_by_type = df_products[df_products[prod_type_col].str.upper().apply(lambda x: active_unit_type in str(x))]
     
     if filtered_catalog_by_type.empty:
@@ -93,28 +98,34 @@ if df_fact is not None and not df_fact.empty:
     col_p1, col_p2, col_p3 = st.columns(3)
     
     with col_p1:
-        # Step A: Filter and select Category Scope
+        # Step 1: Filter Work Category Scope
         cat_col = df_products.columns[1] if len(df_products.columns) > 1 else df_products.columns[0]
         chosen_cat = st.selectbox("Work Category Scope", filtered_catalog_by_type[cat_col].unique())
         filtered_by_cat = filtered_catalog_by_type[filtered_catalog_by_type[cat_col] == chosen_cat]
         
     with col_p2:
-        # Step B: Filter and select by Design Type (Column D / Index 3)
-        design_type_col = df_products.columns[3] if len(df_products.columns) > 3 else df_products.columns[0]
-        chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_cat[design_type_col].unique())
-        filtered_by_design = filtered_by_cat[filtered_by_cat[design_type_col] == chosen_design_type]
+        # STEP 2: SELECT DESIGN OPTION LINK FIRST
+        option_link_col = df_products.columns[4] if len(df_products.columns) > 4 else df_products.columns[0]
+        chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[option_link_col].unique())
+        filtered_by_link = filtered_by_cat[filtered_by_cat[option_link_col] == chosen_option_link]
         
     with col_p3:
-        # Step C: Filter and select by Design Option Link (Column E / Index 4)
-        option_link_col = df_products.columns[4] if len(df_products.columns) > 4 else df_products.columns[0]
-        chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_design[option_link_col].unique())
-        
-        # Pull final unique product record matching the cascade stack inputs
-        product_record = filtered_by_design[filtered_by_design[option_link_col] == chosen_option_link].iloc[0]
+        # STEP 3: SELECT DESIGN TYPE SECOND
+        design_type_col = df_products.columns[3] if len(df_products.columns) > 3 else df_products.columns[0]
+        chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
+        product_record = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type].iloc[0]
 
-    # Staging contextual columns below selections for user reference
+    # --- LIVE PRODUCT & ASSET DATA PREVIEW PANEL ---
     desc_col_text = df_products.columns[6] if len(df_products.columns) > 6 else df_products.columns[-1]
-    st.caption(f"ℹ️ **Selected Variant Target Scope:** {product_record[desc_col_text]}")
+    
+    st.markdown("### 🔍 Product & Client Specification Preview")
+    preview_box = st.container(border=True)
+    with preview_box:
+        cp1, cp2, cp3, cp4 = st.columns(4)
+        cp1.write(f"👤 **Registered Sheet Client:** \n`{db_client_name if db_client_name else 'Unassigned'}`")
+        cp2.write(f"🆔 **Product ID:** \n`{product_record.values[0]}`")
+        cp3.write(f"📐 **Product Area:** \n`{product_record.values[5]} sqm`")
+        cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
 
     # Finance / Installment Lookup Context Block
     st.markdown("#### Financing Structure")
@@ -145,7 +156,7 @@ if df_fact is not None and not df_fact.empty:
 
     with col_f2:
         st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
-    st.info(f"📐 **Run Details:** {target_item_area} sqm (Area metric pulled from selection match) × {unit_base_cost_rate:,.2f} EGP (Rate factor scale) = **{calculated_line_item_total:,.2f} EGP**")
+    st.info(f"📐 **Run Details:** {target_item_area} sqm × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
 
     if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
         st.session_state.staged_items.append({
@@ -207,6 +218,7 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
             pdf.ln(6)
             
+            # Dynamic Legal Contract Terms Appender Block
             pdf.set_font("Helvetica", "B", 11)
             pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
             pdf.set_font("Helvetica", "", 8)
