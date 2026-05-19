@@ -6,44 +6,46 @@ from fpdf import FPDF
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
-# Directly linked to your provided O West Extra Works data model spreadsheet
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=300)  # Caches the data for 5 minutes to keep interface switches instant
+@st.cache_data(ttl=300)
 def load_all_tabs(base_url):
     """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
-        # Extract the core spreadsheet ID from your active sharing URL
         sheet_id = base_url.split("/d/")[1].split("/")[0]
         
-        # Build direct CSV export URLs using the specific tab names from your spreadsheet
         fact_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=FACT"
         products_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=PRODUCTS"
         rates_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=RATES"
         clients_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=CLIENT_NAME"
         terms_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=TERMS_%26_CONDITIONS"
         
-        # Read everything cleanly into Pandas dataframes
         facts = pd.read_csv(fact_url)
         products = pd.read_csv(products_url)
         rates = pd.read_csv(rates_url)
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Basic cleanup: Strip any trailing white spaces from critical key columns
-        facts['Unit_ID'] = facts['Unit_ID'].astype(str).str.strip()
+        # Clean column spaces to prevent breakages
+        facts.columns = facts.columns.str.strip()
+        products.columns = products.columns.str.strip()
+        rates.columns = rates.columns.str.strip()
+        clients.columns = clients.columns.str.strip()
+        terms.columns = terms.columns.str.strip()
+        
+        # Clean specific string values for seamless mapping
+        facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
         facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
         products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
+        clients['Unit ID'] = clients['Unit ID'].astype(str).str.strip()
         
         return facts, products, rates, clients, terms
     except Exception as e:
-        st.error(f"Error accessing Google Sheet tabs. Please verify share settings are set to 'Anyone with link can view'. Details: {e}")
+        st.error(f"Error accessing Google Sheet tabs. Details: {e}")
         return None, None, None, None, None
 
-# Load the database sheets into the run environment
 df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 
-# Initialize staging area for current line items
 if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
 
@@ -54,35 +56,29 @@ st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 st.title("🏗️ Extra Works Quotation Engine")
 
 if df_fact is not None and not df_fact.empty:
-    # --- FIELD SECTION 1: UNIT & CLIENT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        # Select target property unit asset
-        selected_unit = st.selectbox("Select Unit ID", df_fact['Unit_ID'].unique())
-        # Query unit record parameters
-        unit_meta = df_fact[df_fact['Unit_ID'] == selected_unit].iloc[0]
+        # Adjusted key lookups from Unit_ID to 'Unit ID' to align with spreadsheet headers
+        selected_unit = st.selectbox("Select Unit ID", df_fact['Unit ID'].unique())
+        unit_meta = df_fact[df_fact['Unit ID'] == selected_unit].iloc[0]
         
     with col_u2:
-        # Automatically pull associated Client Name if it matches our client registry table, else allow manual input
-        matched_client = df_clients[df_clients['Unit_ID'].astype(str).str.strip() == str(selected_unit).strip()]
+        matched_client = df_clients[df_clients['Unit ID'] == str(selected_unit).strip()]
         default_client_name = matched_client['Client Name'].values[0] if not matched_client.empty else ""
         client_name = st.text_input("Client Name Reference", value=default_client_name)
 
-    # Informational Fact Sheet Display Panel
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Zone", str(unit_meta.get('Zone', 'N/A')))
     m2.metric("Unit Structural Profiling", str(unit_meta.get('Unit Type', 'N/A')))
     m3.metric("Built Up Area (BUA)", f"{unit_meta.get('Built Up Area', 0)} sqm")
-    m4.metric("Roof Footprint", f"{unit_meta.get('Roof Area', 0)} sqm")
+    m4.metric("Garden Area", f"{unit_meta.get('Garden Area', 0)} sqm")
     
     st.divider()
 
-    # --- FIELD SECTION 2: CASCADE MATCHING ENGINE ---
     st.subheader("2. Add Engineering Option Scope")
     
-    # Cascade Filter Level 1: Filter products by current structural property type configuration match
     active_unit_type = str(unit_meta['Unit Type']).strip().upper()
     filtered_catalog_by_type = df_products[df_products['Unit Type'].astype(str).str.strip().str.upper() == active_unit_type]
     
@@ -94,7 +90,6 @@ if df_fact is not None and not df_fact.empty:
     
     with col_p1:
         chosen_cat = st.selectbox("Work Category Scope", filtered_catalog_by_type['Category'].unique())
-        # Filter down items by selected category
         filtered_by_cat = filtered_catalog_by_type[filtered_catalog_by_type['Category'] == chosen_cat]
         
     with col_p2:
@@ -102,21 +97,18 @@ if df_fact is not None and not df_fact.empty:
         product_record = filtered_by_cat[filtered_by_cat['Description'] == chosen_variant].iloc[0]
         
     with col_p3:
-        # Dynamically draw corresponding financing terms rate multipliers matched via structural scope category
         category_rates = df_rates[df_rates['Category'].astype(str).str.strip().str.upper() == str(chosen_cat).strip().str.upper()]
         if category_rates.empty:
             category_rates = df_rates
         chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates['Options'].unique())
         rate_record = category_rates[category_rates['Options'] == chosen_term_option].iloc[0]
 
-    # --- CALCULATION LOGIC ENGINE ---
     try:
         target_item_area = float(product_record.get('Area (sqm)', 0))
     except:
         target_item_area = 0.0
         
     try:
-        # Clean currency characters if present
         rate_val = str(rate_record.get('Rate (per sqm)', 0)).replace(',', '').replace('$', '').strip()
         unit_base_cost_rate = float(rate_val)
     except:
@@ -141,7 +133,6 @@ if df_fact is not None and not df_fact.empty:
 
     st.divider()
 
-    # --- FIELD SECTION 3: STAGING CALCULATOR & COMPILATION SUMMARY ---
     st.subheader("3. Technical Bill of Quantities & Commercial Summary")
     
     if st.session_state.staged_items:
@@ -155,11 +146,7 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.staged_items = []
             st.rerun()
             
-        # ==========================================
-        # 3. PDF DOCUMENT ARCHITECT EXTRACTION ENGINE
-        # ==========================================
         if client_name:
-            # Document Generation Routine
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Helvetica", "B", 16)
@@ -170,7 +157,6 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Property Asset Unit Assignment ID: {selected_unit}", ln=True)
             pdf.ln(8)
             
-            # Draw Data Matrix Table Headers
             pdf.set_font("Helvetica", "B", 10)
             pdf.cell(25, 8, "Product ID", border=1)
             pdf.cell(35, 8, "Category", border=1)
@@ -178,7 +164,6 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(20, 8, "Area (m2)", border=1)
             pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
             
-            # Map Active Line Items Matrix Rows
             pdf.set_font("Helvetica", "", 9)
             for _, item_row in summary_df.iterrows():
                 pdf.cell(25, 8, str(item_row['Product ID']), border=1)
@@ -192,12 +177,10 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Total Aggregate Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
             pdf.ln(6)
             
-            # Append Dynamic Terms & Conditions Context block directly from active structural configuration rules rows
             pdf.set_font("Helvetica", "B", 11)
             pdf.cell(0, 8, "Legal Framework, Commitments, & Strategic Project Adjustments:", ln=True)
             pdf.set_font("Helvetica", "", 8)
             
-            # Extract unique term options pulled into current calculation sheet matrix
             processed_legal_terms = summary_df['Financing Options'].unique()
             for rule_term in processed_legal_terms:
                 matched_legal_text_blocks = df_terms[df_terms['Options'].astype(str).str.strip() == str(rule_term).strip()]['TERM'].values
@@ -205,7 +188,6 @@ if df_fact is not None and not df_fact.empty:
                     pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                     pdf.ln(2)
             
-            # Compile binary payload output object
             compiled_pdf_payload = pdf.output(dest="S").encode("latin-1", errors="ignore")
             
             st.download_button(
