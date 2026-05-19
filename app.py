@@ -8,7 +8,7 @@ from fpdf import FPDF
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)  # Dropped cache timeout to 1 minute for seamless troubleshooting adjustments
 def load_all_tabs(base_url):
     """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
@@ -26,24 +26,29 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Strip invisible spaces from column names safely
+        # Clean up column headers explicitly via safe Python lists to avoid dataframe attribute errors
         facts.columns = [str(c).strip() for c in facts.columns]
         products.columns = [str(c).strip() for c in products.columns]
         rates.columns = [str(c).strip() for c in rates.columns]
         clients.columns = [str(c).strip() for c in clients.columns]
         terms.columns = [str(c).strip() for c in terms.columns]
             
-        # Force map key column names to match the application logic securely
-        clients.columns = [
-            'Client Name' if 'CLIENT' in col.upper() else 
-            'Unit ID' if 'UNIT' in col.upper() else col 
-            for col in clients.columns
-        ]
+        # Clean client sheet column names reliably
+        cleaned_client_cols = []
+        for col in clients.columns:
+            if 'CLIENT' in str(col).upper():
+                cleaned_client_cols.append('Client Name')
+            elif 'UNIT' in str(col).upper():
+                cleaned_client_cols.append('Unit ID')
+            else:
+                cleaned_client_cols.append(col)
+        clients.columns = cleaned_client_cols
         
-        facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in x.upper() else ('Unit Type' if 'TYPE' in x.upper() else x), inplace=True)
-        products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in x.upper() else x, inplace=True)
+        # Force align remaining structural metrics mapping properties
+        facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in str(x).upper() else ('Unit Type' if 'TYPE' in str(x).upper() else x), inplace=True)
+        products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in str(x).upper() else x, inplace=True)
         
-        # Clean specific cell text string values to prevent matching mismatches
+        # Format interior values as clean strings to avoid cross-referencing lookups failing
         facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
         facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
         products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
