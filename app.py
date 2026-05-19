@@ -25,21 +25,14 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # --- THE FIX: DROP PHANTOM GOOGLE SHEET COLUMNS ---
-        facts = facts.loc[:, ~facts.columns.duplicated()]
-        products = products.loc[:, ~products.columns.duplicated()]
-        rates = rates.loc[:, ~rates.columns.duplicated()]
-        clients = clients.loc[:, ~clients.columns.duplicated()]
-        terms = terms.loc[:, ~terms.columns.duplicated()]
-        
-        # Clean up column headers explicitly
+        # 1. Strip spaces from ALL column headers first
         facts.columns = [str(c).strip() for c in facts.columns]
         products.columns = [str(c).strip() for c in products.columns]
         rates.columns = [str(c).strip() for c in rates.columns]
         clients.columns = [str(c).strip() for c in clients.columns]
         terms.columns = [str(c).strip() for c in terms.columns]
             
-        # Clean client sheet column names reliably
+        # 2. Standardize target column names
         cleaned_client_cols = []
         for col in clients.columns:
             if 'CLIENT' in str(col).upper():
@@ -50,11 +43,17 @@ def load_all_tabs(base_url):
                 cleaned_client_cols.append(col)
         clients.columns = cleaned_client_cols
         
-        # Force align remaining structural metrics mapping properties
         facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in str(x).upper() else ('Unit Type' if 'TYPE' in str(x).upper() else x), inplace=True)
         products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in str(x).upper() else x, inplace=True)
         
-        # Clean specific string values to prevent matching errors
+        # 3. DESTROY DUPLICATES (Now that names are unified)
+        facts = facts.loc[:, ~facts.columns.duplicated()].copy()
+        products = products.loc[:, ~products.columns.duplicated()].copy()
+        rates = rates.loc[:, ~rates.columns.duplicated()].copy()
+        clients = clients.loc[:, ~clients.columns.duplicated()].copy()
+        terms = terms.loc[:, ~terms.columns.duplicated()].copy()
+        
+        # 4. Safely clean text inside the columns
         if 'Unit ID' in facts.columns:
             facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
         if 'Unit Type' in facts.columns:
@@ -74,7 +73,6 @@ def load_all_tabs(base_url):
 # ==========================================
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 
-# Add a manual hard-reset button to the sidebar
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
     st.rerun()
