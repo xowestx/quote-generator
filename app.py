@@ -8,7 +8,7 @@ from fpdf import FPDF
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_all_tabs(base_url):
     """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
@@ -26,14 +26,22 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Clean column spaces to prevent breakages
-        facts.columns = facts.columns.str.strip()
-        products.columns = products.columns.str.strip()
-        rates.columns = rates.columns.str.strip()
-        clients.columns = clients.columns.str.strip()
-        terms.columns = terms.columns.str.strip()
+        # Clean up column spaces and strip out casing inconsistencies
+        for df in [facts, products, rates, clients, terms]:
+            df.columns = df.columns.astype(str).str.strip()
+            
+        # FORCE ALIGN CLIENT HEADERS: Ensures the app safely maps 'Client Name' and 'Unit ID'
+        clients.columns = [
+            'Client Name' if 'CLIENT' in col.upper() else 
+            'Unit ID' if 'UNIT' in col.upper() else col 
+            for col in clients.columns
+        ]
         
-        # Clean specific string values for seamless mapping
+        # Force align remaining essential columns
+        facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in x.upper() else ('Unit Type' if 'TYPE' in x.upper() else x), inplace=True)
+        products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in x.upper() else x, inplace=True)
+        
+        # Clean specific string values for seamless mapping strings
         facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
         facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
         products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
@@ -60,13 +68,17 @@ if df_fact is not None and not df_fact.empty:
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        # Adjusted key lookups from Unit_ID to 'Unit ID' to align with spreadsheet headers
         selected_unit = st.selectbox("Select Unit ID", df_fact['Unit ID'].unique())
         unit_meta = df_fact[df_fact['Unit ID'] == selected_unit].iloc[0]
         
     with col_u2:
+        # Protected client registry lookups
         matched_client = df_clients[df_clients['Unit ID'] == str(selected_unit).strip()]
-        default_client_name = matched_client['Client Name'].values[0] if not matched_client.empty else ""
+        default_client_name = ""
+        if not matched_client.empty:
+            # Safely grab the first column value as the name regardless of header mapping flaws
+            default_client_name = matched_client.iloc[0]['Client Name']
+            
         client_name = st.text_input("Client Name Reference", value=default_client_name)
 
     m1, m2, m3, m4 = st.columns(4)
