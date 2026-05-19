@@ -19,57 +19,26 @@ def load_all_tabs(base_url):
         clients_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=CLIENT_NAME"
         terms_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=TERMS_%26_CONDITIONS"
         
+        # Read data natively
         facts = pd.read_csv(fact_url)
         products = pd.read_csv(products_url)
         rates = pd.read_csv(rates_url)
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # 1. Strip spaces from ALL column headers first
-        facts.columns = [str(c).strip() for c in facts.columns]
-        products.columns = [str(c).strip() for c in products.columns]
-        rates.columns = [str(c).strip() for c in rates.columns]
-        clients.columns = [str(c).strip() for c in clients.columns]
-        terms.columns = [str(c).strip() for c in terms.columns]
-            
-        # 2. Standardize target column names
-        cleaned_client_cols = []
-        for col in clients.columns:
-            if 'CLIENT' in str(col).upper():
-                cleaned_client_cols.append('Client Name')
-            elif 'UNIT' in str(col).upper():
-                cleaned_client_cols.append('Unit ID')
-            else:
-                cleaned_client_cols.append(col)
-        clients.columns = cleaned_client_cols
-        
-        facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in str(x).upper() else ('Unit Type' if 'TYPE' in str(x).upper() else x), inplace=True)
-        products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in str(x).upper() else x, inplace=True)
-        
-        # 3. DESTROY DUPLICATES (Now that names are unified)
-        facts = facts.loc[:, ~facts.columns.duplicated()].copy()
-        products = products.loc[:, ~products.columns.duplicated()].copy()
-        rates = rates.loc[:, ~rates.columns.duplicated()].copy()
-        clients = clients.loc[:, ~clients.columns.duplicated()].copy()
-        terms = terms.loc[:, ~terms.columns.duplicated()].copy()
-        
-        # 4. Safely clean text inside the columns
-        if 'Unit ID' in facts.columns:
-            facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
-        if 'Unit Type' in facts.columns:
-            facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
-        if 'Unit Type' in products.columns:
-            products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
-        if 'Unit ID' in clients.columns:
-            clients['Unit ID'] = clients['Unit ID'].astype(str).str.strip()
-        
+        # Clean trailing spaces off headers and cell values safely
+        for df in [facts, products, rates, clients, terms]:
+            df.columns = [str(c).strip() for c in df.columns]
+            for col in df.select_dtypes(include=['object']).columns:
+                df[col] = df[col].astype(str).str.strip()
+                
         return facts, products, rates, clients, terms
     except Exception as e:
         st.error(f"Error accessing Google Sheet tabs. Details: {e}")
         return None, None, None, None, None
 
 # ==========================================
-# 2. APPLICATION INTERFACE & LOGIC
+# 2. APPLICATION INTERFACE
 # ==========================================
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 
@@ -93,11 +62,8 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact['Unit ID'] == selected_unit].iloc[0]
         
     with col_u2:
-        matched_client = df_clients[df_clients['Unit ID'] == str(selected_unit).strip()]
-        default_client_name = ""
-        if not matched_client.empty:
-            default_client_name = matched_client.iloc[0]['Client Name']
-            
+        matched_client = df_clients[df_clients['Unit ID'] == selected_unit]
+        default_client_name = matched_client.iloc[0]['Client Name'] if not matched_client.empty else ""
         client_name = st.text_input("Client Name Reference", value=default_client_name)
 
     m1, m2, m3, m4 = st.columns(4)
@@ -110,11 +76,11 @@ if df_fact is not None and not df_fact.empty:
 
     st.subheader("2. Add Engineering Option Scope")
     
-    active_unit_type = str(unit_meta['Unit Type']).strip().upper()
-    filtered_catalog_by_type = df_products[df_products['Unit Type'].astype(str).str.strip().str.upper() == active_unit_type]
+    active_unit_type = str(unit_meta['Unit Type']).upper()
+    filtered_catalog_by_type = df_products[df_products['Unit Type'].str.upper() == active_unit_type]
     
     if filtered_catalog_by_type.empty:
-        st.warning(f"No entry found matching exactly '{unit_meta['Unit Type']}' in PRODUCTS sheet. Showing full list as fallback.")
+        st.warning(f"No configuration matching '{unit_meta['Unit Type']}' found in PRODUCTS sheet. Using full fallback list.")
         filtered_catalog_by_type = df_products
 
     col_p1, col_p2, col_p3 = st.columns(3)
@@ -128,7 +94,7 @@ if df_fact is not None and not df_fact.empty:
         product_record = filtered_by_cat[filtered_by_cat['Description'] == chosen_variant].iloc[0]
         
     with col_p3:
-        category_rates = df_rates[df_rates['Category'].astype(str).str.strip().str.upper() == str(chosen_cat).strip().str.upper()]
+        category_rates = df_rates[df_rates['Category'].str.upper() == str(chosen_cat).upper()]
         if category_rates.empty:
             category_rates = df_rates
         chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates['Options'].unique())
@@ -147,7 +113,7 @@ if df_fact is not None and not df_fact.empty:
         
     calculated_line_item_total = target_item_area * unit_base_cost_rate
 
-    st.info(f"📐 **Calculation Run Logic:** {target_item_area} sqm (Product Area Block) × {unit_base_cost_rate:,.2f} EGP (Rate Scale Factor) = **{calculated_line_item_total:,.2f} EGP**")
+    st.info(f"📐 **Calculation Run Logic:** {target_item_area} sqm × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
 
     if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
         st.session_state.staged_items.append({
@@ -159,7 +125,7 @@ if df_fact is not None and not df_fact.empty:
             'Financing Options': chosen_term_option,
             'Calculated_Price': calculated_line_item_total
         })
-        st.toast("Line item appended to calculation stack.")
+        st.toast("Line item appended.")
         st.rerun()
 
     st.divider()
@@ -173,7 +139,7 @@ if df_fact is not None and not df_fact.empty:
         aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
         st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
         
-        if st.button("❌ Reset Work Scope Form Layout Stack"):
+        if st.button("❌ Reset Work Scope Form"):
             st.session_state.staged_items = []
             st.rerun()
             
@@ -184,14 +150,14 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
             pdf.set_font("Helvetica", "", 12)
             pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-            pdf.cell(0, 10, f"Client Structural Reference Name: {client_name}", ln=True)
-            pdf.cell(0, 10, f"Property Asset Unit Assignment ID: {selected_unit}", ln=True)
+            pdf.cell(0, 10, f"Client Reference Name: {client_name}", ln=True)
+            pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
             pdf.ln(8)
             
             pdf.set_font("Helvetica", "B", 10)
             pdf.cell(25, 8, "Product ID", border=1)
             pdf.cell(35, 8, "Category", border=1)
-            pdf.cell(75, 8, "Scope Description Variant", border=1)
+            pdf.cell(75, 8, "Scope Description", border=1)
             pdf.cell(20, 8, "Area (m2)", border=1)
             pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
             
@@ -205,16 +171,16 @@ if df_fact is not None and not df_fact.empty:
                 
             pdf.ln(6)
             pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 10, f"Total Aggregate Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
+            pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
             pdf.ln(6)
             
             pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, "Legal Framework, Commitments, & Strategic Project Adjustments:", ln=True)
+            pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
             pdf.set_font("Helvetica", "", 8)
             
             processed_legal_terms = summary_df['Financing Options'].unique()
             for rule_term in processed_legal_terms:
-                matched_legal_text_blocks = df_terms[df_terms['Options'].astype(str).str.strip() == str(rule_term).strip()]['TERM'].values
+                matched_legal_text_blocks = df_terms[df_terms['Options'] == rule_term]['TERM'].values
                 if len(matched_legal_text_blocks) > 0:
                     pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                     pdf.ln(2)
@@ -222,7 +188,7 @@ if df_fact is not None and not df_fact.empty:
             compiled_pdf_payload = pdf.output(dest="S").encode("latin-1", errors="ignore")
             
             st.download_button(
-                label="📄 Finalize Contract Formulation & Download PDF Proposal Package",
+                label="📄 Download PDF Proposal Package",
                 data=compiled_pdf_payload,
                 file_name=f"O_West_Proposal_{client_name.replace(' ', '_')}.pdf",
                 mime="application/pdf",
@@ -230,8 +196,8 @@ if df_fact is not None and not df_fact.empty:
                 use_container_width=True
             )
         else:
-            st.warning("Ensure the client identification entry field is complete before initializing document processing pipeline loops.")
+            st.warning("Ensure the client identification entry field is complete.")
     else:
-        st.write("No active physical extensions currently staged inside current calculation template.")
+        st.write("No items staged inside calculation template.")
 else:
-    st.info("Awaiting structural backend connection strings parsing engine runtime...")
+    st.info("Awaiting structural backend connection...")
