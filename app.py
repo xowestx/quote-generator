@@ -8,9 +8,8 @@ from fpdf import FPDF
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=60)  # Dropped cache timeout to 1 minute for seamless troubleshooting adjustments
+@st.cache_data(ttl=60)
 def load_all_tabs(base_url):
-    """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
         sheet_id = base_url.split("/d/")[1].split("/")[0]
         
@@ -26,7 +25,14 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Clean up column headers explicitly via safe Python lists to avoid dataframe attribute errors
+        # --- THE FIX: DROP PHANTOM GOOGLE SHEET COLUMNS ---
+        facts = facts.loc[:, ~facts.columns.duplicated()]
+        products = products.loc[:, ~products.columns.duplicated()]
+        rates = rates.loc[:, ~rates.columns.duplicated()]
+        clients = clients.loc[:, ~clients.columns.duplicated()]
+        terms = terms.loc[:, ~terms.columns.duplicated()]
+        
+        # Clean up column headers explicitly
         facts.columns = [str(c).strip() for c in facts.columns]
         products.columns = [str(c).strip() for c in products.columns]
         rates.columns = [str(c).strip() for c in rates.columns]
@@ -48,27 +54,37 @@ def load_all_tabs(base_url):
         facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in str(x).upper() else ('Unit Type' if 'TYPE' in str(x).upper() else x), inplace=True)
         products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in str(x).upper() else x, inplace=True)
         
-        # Format interior values as clean strings to avoid cross-referencing lookups failing
-        facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
-        facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
-        products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
-        clients['Unit ID'] = clients['Unit ID'].astype(str).str.strip()
+        # Clean specific string values to prevent matching errors
+        if 'Unit ID' in facts.columns:
+            facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
+        if 'Unit Type' in facts.columns:
+            facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
+        if 'Unit Type' in products.columns:
+            products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
+        if 'Unit ID' in clients.columns:
+            clients['Unit ID'] = clients['Unit ID'].astype(str).str.strip()
         
         return facts, products, rates, clients, terms
     except Exception as e:
         st.error(f"Error accessing Google Sheet tabs. Details: {e}")
         return None, None, None, None, None
 
+# ==========================================
+# 2. APPLICATION INTERFACE & LOGIC
+# ==========================================
+st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
+
+# Add a manual hard-reset button to the sidebar
+if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.title("🏗️ Extra Works Quotation Engine")
+
 df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 
 if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
-
-# ==========================================
-# 2. APPLICATION INTERFACE
-# ==========================================
-st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
-st.title("🏗️ Extra Works Quotation Engine")
 
 if df_fact is not None and not df_fact.empty:
     st.subheader("1. Project & Asset Context")
