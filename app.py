@@ -8,7 +8,7 @@ from fpdf import FPDF
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def load_all_tabs(base_url):
     """Converts a standard Google Sheet share link into a direct pandas CSV export link for each tab."""
     try:
@@ -26,22 +26,24 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Clean up column spaces and strip out casing inconsistencies
-        for df in [facts, products, rates, clients, terms]:
-            df.columns = df.columns.astype(str).str.strip()
+        # Strip invisible spaces from column names safely
+        facts.columns = [str(c).strip() for c in facts.columns]
+        products.columns = [str(c).strip() for c in products.columns]
+        rates.columns = [str(c).strip() for c in rates.columns]
+        clients.columns = [str(c).strip() for c in clients.columns]
+        terms.columns = [str(c).strip() for c in terms.columns]
             
-        # FORCE ALIGN CLIENT HEADERS: Ensures the app safely maps 'Client Name' and 'Unit ID'
+        # Force map key column names to match the application logic securely
         clients.columns = [
             'Client Name' if 'CLIENT' in col.upper() else 
             'Unit ID' if 'UNIT' in col.upper() else col 
             for col in clients.columns
         ]
         
-        # Force align remaining essential columns
         facts.rename(columns=lambda x: 'Unit ID' if 'UNIT' in x.upper() else ('Unit Type' if 'TYPE' in x.upper() else x), inplace=True)
         products.rename(columns=lambda x: 'Unit Type' if 'TYPE' in x.upper() else x, inplace=True)
         
-        # Clean specific string values for seamless mapping strings
+        # Clean specific cell text string values to prevent matching mismatches
         facts['Unit ID'] = facts['Unit ID'].astype(str).str.strip()
         facts['Unit Type'] = facts['Unit Type'].astype(str).str.strip()
         products['Unit Type'] = products['Unit Type'].astype(str).str.strip()
@@ -72,11 +74,9 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact['Unit ID'] == selected_unit].iloc[0]
         
     with col_u2:
-        # Protected client registry lookups
         matched_client = df_clients[df_clients['Unit ID'] == str(selected_unit).strip()]
         default_client_name = ""
         if not matched_client.empty:
-            # Safely grab the first column value as the name regardless of header mapping flaws
             default_client_name = matched_client.iloc[0]['Client Name']
             
         client_name = st.text_input("Client Name Reference", value=default_client_name)
