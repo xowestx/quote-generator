@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from fpdf import FPDF
+import re
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
@@ -90,8 +91,9 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        safe_selected_unit = str(selected_unit).strip().upper()
-        df_clients['MATCH_ID'] = df_clients[client_unit_col].astype(str).str.strip().str.upper()
+        # Bulletproof Match: Strip ALL whitespace (including internal spaces, tabs, non-breaking spaces) using regex
+        safe_selected_unit = re.sub(r'\s+', '', str(selected_unit)).upper()
+        df_clients['MATCH_ID'] = df_clients[client_unit_col].astype(str).str.replace(r'\s+', '', regex=True).str.upper()
         matched_client = df_clients[df_clients['MATCH_ID'] == safe_selected_unit]
         
         db_client_name = ""
