@@ -55,9 +55,17 @@ if 'staged_items' not in st.session_state:
 if df_fact is not None and not df_fact.empty:
     
     # Safely locate core columns by name to prevent breaking if spreadsheet columns move
-    fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in c.upper()), df_fact.columns[0])
-    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in c.upper()), df_clients.columns[-1])
-    client_name_col = next((c for c in df_clients.columns if 'CLIENT' in c.upper()), df_clients.columns[0])
+    fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
+    
+    # --- STRICT CLIENT NAME LOOKUP FIX ---
+    # Force the app to explicitly identify the 'Client Name' column and the 'Unit ID' column in the CLIENT_NAME tab
+    client_name_col = next((c for c in df_clients.columns if 'CLIENT' in str(c).upper() or 'NAME' in str(c).upper()), df_clients.columns[0])
+    client_unit_col = next((c for c in df_clients.columns if 'UNIT' in str(c).upper() or 'ID' in str(c).upper()), df_clients.columns[-1])
+    
+    # Failsafe: Ensure they aren't accidentally mapped to the same column
+    if client_name_col == client_unit_col:
+        client_name_col = df_clients.columns[0]
+        client_unit_col = df_clients.columns[-1]
     
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
@@ -68,8 +76,17 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        matched_client = df_clients[df_clients[client_unit_col] == selected_unit]
-        db_client_name = matched_client.iloc[0][client_name_col] if not matched_client.empty else ""
+        # Match client data dynamically, stripping strings to guarantee a perfect match
+        safe_selected_unit = str(selected_unit).strip().upper()
+        matched_client = df_clients[df_clients[client_unit_col].astype(str).str.strip().str.upper() == safe_selected_unit]
+        
+        db_client_name = ""
+        if not matched_client.empty:
+            raw_name = matched_client.iloc[0][client_name_col]
+            # Ignore cells that Google Sheets exported as "nan" (blank)
+            if str(raw_name).strip().lower() != 'nan':
+                db_client_name = raw_name
+                
         client_name = st.text_input("Client Name Reference", value=str(db_client_name))
 
     # Extract exact unit architectural parameters securely
@@ -98,7 +115,6 @@ if df_fact is not None and not df_fact.empty:
     target_unit_type = str(unit_type).strip().upper()
     
     # CORE UPGRADE: Strict filtering by the EXACT Design Option of the selected unit
-    # (e.g., Only show products where "A1-Design 1" is listed in the product's valid option links)
     filtered_catalog = df_products[
         df_products[prod_opt_link_col].astype(str).str.upper().apply(
             lambda x: target_design_opt in x if target_design_opt and target_design_opt != 'NAN' else False
@@ -123,12 +139,10 @@ if df_fact is not None and not df_fact.empty:
         filtered_by_cat = filtered_catalog[filtered_catalog[cat_col] == chosen_cat]
         
     with col_p2:
-        # Filtered strictly down to relevant options
         chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[prod_opt_link_col].unique())
         filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
         
     with col_p3:
-        # Filtered strictly down to relevant types
         design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
         product_record = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type].iloc[0]
