@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 from fpdf import FPDF
 import re
+import requests
+import json
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
@@ -49,6 +51,9 @@ def load_all_tabs(base_url):
 # 2. APPLICATION INTERFACE
 # ==========================================
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
+
+st.sidebar.markdown("### 🔌 API Connections")
+webhook_url = st.sidebar.text_input("Google Apps Script Webhook URL", type="password", help="Paste your deployed Google Apps Script Web App URL here.")
 
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
@@ -106,6 +111,7 @@ if df_fact is not None and not df_fact.empty:
     unit_design_type = unit_meta.get('Design Type', '')
     unit_design_opt = unit_meta.get('Design Options', '')
     unit_bua = unit_meta.get('Built Up Area', 0)
+    zone_name = unit_meta.get('Zone', 'Unknown Zone')
     
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Unit Profile", str(unit_type) if unit_type else "N/A")
@@ -274,61 +280,108 @@ if df_fact is not None and not df_fact.empty:
         # ---------------------------------------------
         
         if client_name:
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
-            pdf.set_font("Helvetica", "", 12)
-            pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-            pdf.cell(0, 10, f"Client Reference Name: {client_name}", ln=True)
-            pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
-            pdf.ln(8)
+            col_export1, col_export2 = st.columns(2)
             
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(25, 8, "Product ID", border=1)
-            pdf.cell(35, 8, "Category", border=1)
-            pdf.cell(75, 8, "Scope Description", border=1)
-            pdf.cell(20, 8, "Area (m2)", border=1)
-            pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
-            
-            pdf.set_font("Helvetica", "", 9)
-            for _, item_row in summary_df.iterrows():
-                pdf.cell(25, 8, str(item_row['Product ID']), border=1)
-                pdf.cell(35, 8, str(item_row['Category']), border=1)
-                pdf.cell(75, 8, str(item_row['Description'])[:42], border=1)
-                pdf.cell(20, 8, str(item_row['Area (sqm)']), border=1)
-                pdf.cell(35, 8, f"{item_row['Calculated_Price']:,.2f}", border=1, ln=True)
+            # ----------------------------------------------------
+            # WEBHOOK EXPORT BUTTON (GOOGLE DOCS)
+            # ----------------------------------------------------
+            with col_export1:
+                if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
+                    if not webhook_url:
+                        st.error("Please enter the Google Apps Script Webhook URL in the sidebar.")
+                    else:
+                        with st.spinner("Transmitting to Google Workspace..."):
+                            # Prepare JSON payload matching what your Apps Script needs
+                            payload = {
+                                "unitId": selected_unit,
+                                "clientName": client_name,
+                                "zone": str(zone_name),
+                                "requestType": "Extra Works Custom Request",
+                                "items": []
+                            }
+                            
+                            for item in st.session_state.staged_items:
+                                payload["items"].append({
+                                    "description": item["Description"],
+                                    "unit": "sqm",
+                                    "qty": item["Area (sqm)"],
+                                    "rate": item["Rate Factor"]
+                                })
+                                
+                            try:
+                                headers = {"Content-Type": "application/json"}
+                                response = requests.post(webhook_url, data=json.dumps(payload), headers=headers)
+                                
+                                if response.status_code == 200:
+                                    response_data = response.json()
+                                    if response_data.get("status") == "success":
+                                        st.success("✅ Quotation Generated Successfully!")
+                                        st.markdown(f"**[📄 Click Here to Open the Generated Google Doc]({response_data.get('docUrl')})**")
+                                    else:
+                                        st.error(f"Apps Script Error: {response_data.get('message')}")
+                                else:
+                                    st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
+                            except Exception as e:
+                                st.error(f"Connection failed: {e}")
+
+            # ----------------------------------------------------
+            # STANDARD FPDF EXPORT BUTTON
+            # ----------------------------------------------------
+            with col_export2:
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 16)
+                pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
+                pdf.set_font("Helvetica", "", 12)
+                pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
+                pdf.cell(0, 10, f"Client Reference Name: {client_name}", ln=True)
+                pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
+                pdf.ln(8)
                 
-            pdf.ln(6)
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
-            pdf.ln(6)
-            
-            # Dynamic Legal Contract Terms Appender Block
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
-            pdf.set_font("Helvetica", "", 8)
-            
-            terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
-            terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
-            
-            processed_legal_terms = summary_df['Financing Options'].unique()
-            for rule_term in processed_legal_terms:
-                matched_legal_text_blocks = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
-                if len(matched_legal_text_blocks) > 0:
-                    pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
-                    pdf.ln(2)
-            
-            compiled_pdf_payload = pdf.output(dest="S").encode("latin-1", errors="ignore")
-            
-            st.download_button(
-                label="📄 Download PDF Proposal Package",
-                data=compiled_pdf_payload,
-                file_name=f"O_West_Proposal_{client_name.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                type="primary",
-                use_container_width=True
-            )
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.cell(25, 8, "Product ID", border=1)
+                pdf.cell(35, 8, "Category", border=1)
+                pdf.cell(75, 8, "Scope Description", border=1)
+                pdf.cell(20, 8, "Area (m2)", border=1)
+                pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
+                
+                pdf.set_font("Helvetica", "", 9)
+                for _, item_row in summary_df.iterrows():
+                    pdf.cell(25, 8, str(item_row['Product ID']), border=1)
+                    pdf.cell(35, 8, str(item_row['Category']), border=1)
+                    pdf.cell(75, 8, str(item_row['Description'])[:42], border=1)
+                    pdf.cell(20, 8, str(item_row['Area (sqm)']), border=1)
+                    pdf.cell(35, 8, f"{item_row['Calculated_Price']:,.2f}", border=1, ln=True)
+                    
+                pdf.ln(6)
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
+                pdf.ln(6)
+                
+                # Dynamic Legal Contract Terms Appender Block
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
+                pdf.set_font("Helvetica", "", 8)
+                
+                terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
+                terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
+                
+                processed_legal_terms = summary_df['Financing Options'].unique()
+                for rule_term in processed_legal_terms:
+                    matched_legal_text_blocks = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
+                    if len(matched_legal_text_blocks) > 0:
+                        pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
+                        pdf.ln(2)
+                
+                compiled_pdf_payload = pdf.output(dest="S").encode("latin-1", errors="ignore")
+                
+                st.download_button(
+                    label="📄 Download Quick PDF Preview",
+                    data=compiled_pdf_payload,
+                    file_name=f"O_West_Proposal_{client_name.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
         else:
             st.warning("Ensure the client identification entry field is complete.")
     else:
