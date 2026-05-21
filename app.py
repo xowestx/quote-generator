@@ -64,9 +64,9 @@ if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
-    # Strict Client Column Locators
-    client_name_col = df_clients.columns[0]
-    client_unit_col = df_clients.columns[2] if len(df_clients.columns) > 2 else df_clients.columns[-1]
+    # Strict Client Column Locators (Dynamically updated to prevent shift errors)
+    client_name_col = next((c for c in df_clients.columns if 'CLIENT' in str(c).upper() or 'NAME' in str(c).upper()), df_clients.columns[0])
+    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_clients.columns[-1])
     
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
@@ -85,9 +85,9 @@ if df_fact is not None and not df_fact.empty:
         if not matched_client.empty:
             raw_name = matched_client.iloc[0][client_name_col]
             if str(raw_name).strip().upper() not in ['NAN', 'NONE', '']:
-                db_client_name = raw_name
+                db_client_name = str(raw_name).strip()
                 
-        client_name = st.text_input("Client Name Reference", value=str(db_client_name))
+        client_name = st.text_input("Client Name Reference", value=db_client_name)
 
     # Extract exact unit architectural parameters securely
     unit_type = unit_meta.get('Unit Type', '')
