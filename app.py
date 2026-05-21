@@ -219,10 +219,32 @@ if df_fact is not None and not df_fact.empty:
         aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
         st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
         
-        if st.button("❌ Reset Work Scope Form Layout Stack"):
-            st.session_state.staged_items = []
-            st.rerun()
-            
+        # --- NEW FEATURE: INDIVIDUAL ITEM DELETION ---
+        st.markdown("##### Manage Staged Items")
+        del_col1, del_col2, del_col3 = st.columns([2, 1, 1])
+        with del_col1:
+            item_to_remove = st.selectbox(
+                "Select Line Item to Remove", 
+                range(len(st.session_state.staged_items)), 
+                format_func=lambda x: f"{st.session_state.staged_items[x]['Product ID']} - {st.session_state.staged_items[x]['Category']}"
+            )
+        with del_col2:
+            st.write("") # Spacing to align with selectbox
+            st.write("")
+            if st.button("🗑️ Remove Selected Item", use_container_width=True):
+                st.session_state.staged_items.pop(item_to_remove)
+                st.toast("Item removed from BOQ.")
+                st.rerun()
+        with del_col3:
+            st.write("") 
+            st.write("")
+            if st.button("❌ Reset Entire BOQ", type="secondary", use_container_width=True):
+                st.session_state.staged_items = []
+                st.rerun()
+                
+        st.divider()
+        # ---------------------------------------------
+        
         if client_name:
             pdf = FPDF()
             pdf.add_page()
