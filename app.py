@@ -106,10 +106,13 @@ if df_fact is not None and not df_fact.empty:
     # --- SECTION 2: CUMULATIVE SMART FILTER ---
     st.subheader("2. Add Engineering Option Scope")
     
-    # Locate product columns safely
+    # Locate product columns safely (moved up for broader access)
+    prod_id_col = df_products.columns[0]
     prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
     design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
     prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
+    prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
+    desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
     
     target_unit_type = str(unit_type).strip().upper()
     target_design_type = str(unit_design_type).strip().upper()
@@ -140,7 +143,8 @@ if df_fact is not None and not df_fact.empty:
         st.warning("No specific architectural matches found. Loading full catalog.")
         filtered_catalog = df_products
 
-    col_p1, col_p2, col_p3 = st.columns(3)
+    # 4-Column Layout to include the Specific Variant Selection
+    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
     
     with col_p1:
         cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
@@ -153,13 +157,18 @@ if df_fact is not None and not df_fact.empty:
         
     with col_p3:
         chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
-        product_record = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type].iloc[0]
+        filtered_by_design = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type]
+        
+    with col_p4:
+        # Create a display format combining Area and Description for pinpoint product selection
+        def format_scope(idx):
+            row = filtered_by_design.loc[idx]
+            return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
+            
+        chosen_idx = st.selectbox("Specific Scope Variant", filtered_by_design.index, format_func=format_scope)
+        product_record = filtered_by_design.loc[chosen_idx]
 
     # --- LIVE PRODUCT & ASSET DATA PREVIEW PANEL ---
-    prod_id_col = df_products.columns[0]
-    prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
-    desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
-    
     st.markdown("### 🔍 Product Specification Match Preview")
     preview_box = st.container(border=True)
     with preview_box:
