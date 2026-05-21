@@ -28,7 +28,14 @@ def load_all_tabs(base_url):
         # CORE FIX: Destroy all NaN (blank) cells immediately so Python never throws a TypeError
         for df in [facts, products, rates, clients, terms]:
             df.columns = [str(c).strip() for c in df.columns]
-            df.fillna('', inplace=True)
+            
+            # Fill numeric columns with 0 and non-numeric with empty strings to prevent dtype conflicts
+            num_cols = df.select_dtypes(include=['number']).columns
+            df[num_cols] = df[num_cols].fillna(0)
+            
+            obj_cols = df.select_dtypes(exclude=['number']).columns
+            df[obj_cols] = df[obj_cols].fillna('')
+            
             for col in df.select_dtypes(include=['object']).columns:
                 df[col] = df[col].astype(str).str.strip()
                 
