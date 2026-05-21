@@ -65,23 +65,6 @@ if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
-    # Strict Client Column Locators (Dynamically updated to prevent shift errors & collisions)
-    client_cols = list(df_clients.columns)
-    
-    # 1. Try to find precise matches first
-    client_name_col = next((c for c in client_cols if 'CLIENT NAME' in str(c).upper()), None)
-    if not client_name_col:
-        client_name_col = next((c for c in client_cols if 'CLIENT' in str(c).upper() or 'NAME' in str(c).upper()), client_cols[0])
-        
-    client_unit_col = next((c for c in client_cols if 'UNIT ID' in str(c).upper()), None)
-    if not client_unit_col:
-        client_unit_col = next((c for c in client_cols if 'UNIT' in str(c).upper() or 'ID' in str(c).upper()), client_cols[-1])
-        
-    # 2. Collision failsafe: If they accidentally point to the same column, force absolute indexing based on your DB layout
-    if client_name_col == client_unit_col:
-        client_name_col = client_cols[0]
-        client_unit_col = client_cols[2] if len(client_cols) > 2 else client_cols[-1]
-    
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
@@ -91,17 +74,31 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        # Bulletproof Match: Strip ALL whitespace (including internal spaces, tabs, non-breaking spaces) using regex
-        safe_selected_unit = re.sub(r'\s+', '', str(selected_unit)).upper()
-        df_clients['MATCH_ID'] = df_clients[client_unit_col].astype(str).str.replace(r'\s+', '', regex=True).str.upper()
-        matched_client = df_clients[df_clients['MATCH_ID'] == safe_selected_unit]
+        # 🚀 SUPER FUZZY MATCHING LOGIC
+        # Strip spaces, dashes, slashes, and underscores to handle ANY typo in the database
+        def super_clean(text):
+            return re.sub(r'[\s\-_/]+', '', str(text)).upper()
+            
+        safe_selected_unit = super_clean(selected_unit)
+        
+        # Identify Client Name column reliably
+        client_name_col = next((c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()), df_clients.columns[0])
         
         db_client_name = ""
-        if not matched_client.empty:
-            raw_name = matched_client.iloc[0][client_name_col]
-            if str(raw_name).strip().upper() not in ['NAN', 'NONE', '']:
-                db_client_name = str(raw_name).strip()
+        # Search every single column in the clients sheet for the fuzzy Unit ID
+        for col in df_clients.columns:
+            cleaned_col = df_clients[col].apply(super_clean)
+            matched_rows = df_clients[cleaned_col == safe_selected_unit]
+            
+            if not matched_rows.empty:
+                raw_name = matched_rows.iloc[0][client_name_col]
+                cleaned_raw = super_clean(raw_name)
                 
+                # Ensure we didn't just extract the Unit ID or a blank value by accident
+                if cleaned_raw != safe_selected_unit and cleaned_raw not in ['NAN', 'NONE', '']:
+                    db_client_name = str(raw_name).strip()
+                    break # Success! Match found.
+                    
         client_name = st.text_input("Client Name Reference", value=db_client_name)
 
     # Extract exact unit architectural parameters securely
