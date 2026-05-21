@@ -53,78 +53,98 @@ if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
 
 if df_fact is not None and not df_fact.empty:
+    
+    # Safely locate core columns by name to prevent breaking if spreadsheet columns move
+    fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in c.upper()), df_fact.columns[0])
+    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in c.upper()), df_clients.columns[-1])
+    client_name_col = next((c for c in df_clients.columns if 'CLIENT' in c.upper()), df_clients.columns[0])
+    
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        unit_id_col = df_fact.columns[0]
-        selected_unit = st.selectbox("Select Unit ID", df_fact[unit_id_col].unique())
-        unit_meta = df_fact[df_fact[unit_id_col] == selected_unit].iloc[0]
+        selected_unit = st.selectbox("Select Unit ID", df_fact[fact_unit_id_col].unique())
+        unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        # Match client data dynamically by row position index
-        client_unit_col = df_clients.columns[2] if len(df_clients.columns) > 2 else df_clients.columns[-1]
         matched_client = df_clients[df_clients[client_unit_col] == selected_unit]
-        
-        db_client_name = ""
-        if not matched_client.empty:
-            db_client_name = matched_client.iloc[0].values[0]
-            
-        # Keep the reference input field fully editable
+        db_client_name = matched_client.iloc[0][client_name_col] if not matched_client.empty else ""
         client_name = st.text_input("Client Name Reference", value=str(db_client_name))
 
-    # Metric Panel Context Display (Safe positional mapping)
+    # Extract exact unit architectural parameters securely
+    unit_type = unit_meta.get('Unit Type', 'N/A')
+    unit_design_type = unit_meta.get('Design Type', 'N/A')
+    unit_design_opt = unit_meta.get('Design Options', 'N/A')
+    unit_bua = unit_meta.get('Built Up Area', 0)
+    
+    # Display the specific native design to the user
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Zone", str(unit_meta.values[2] if len(unit_meta) > 2 else "N/A"))
-    m2.metric("Unit Structural Profiling", str(unit_meta.values[4] if len(unit_meta) > 4 else "N/A"))
-    m3.metric("Built Up Area (BUA)", f"{unit_meta.values[7] if len(unit_meta) > 7 else 0} sqm")
-    m4.metric("Garden Area", f"{unit_meta.values[11] if len(unit_meta) > 11 else 0} sqm")
+    m1.metric("Unit Profile", str(unit_type))
+    m2.metric("Native Design Options", str(unit_design_opt))
+    m3.metric("Native Design Type", str(unit_design_type))
+    m4.metric("Built Up Area (BUA)", f"{unit_bua} sqm")
     
     st.divider()
 
-    # --- SECTION 2: REVERSED CASCADING SELECTION ENGINE ---
+    # --- SECTION 2: CONTEXT-AWARE CASCADING FILTER ---
     st.subheader("2. Add Engineering Option Scope")
     
-    active_unit_type = str(unit_meta.values[4] if len(unit_meta) > 4 else "").strip().upper()
-    prod_type_col = df_products.columns[2] if len(df_products.columns) > 2 else df_products.columns[0]
+    # Locate product columns safely
+    prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
+    prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
     
-    # Safe multi-match lookup for comma-separated property types
-    filtered_catalog_by_type = df_products[df_products[prod_type_col].str.upper().apply(lambda x: active_unit_type in str(x))]
+    target_design_opt = str(unit_design_opt).strip().upper()
+    target_unit_type = str(unit_type).strip().upper()
     
-    if filtered_catalog_by_type.empty:
-        filtered_catalog_by_type = df_products
+    # CORE UPGRADE: Strict filtering by the EXACT Design Option of the selected unit
+    # (e.g., Only show products where "A1-Design 1" is listed in the product's valid option links)
+    filtered_catalog = df_products[
+        df_products[prod_opt_link_col].astype(str).str.upper().apply(
+            lambda x: target_design_opt in x if target_design_opt and target_design_opt != 'NAN' else False
+        )
+    ]
+    
+    # Fallback: If no strict Design Option match exists, filter by general Unit Type
+    if filtered_catalog.empty:
+        filtered_catalog = df_products[
+            df_products[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
+        ]
+        
+    if filtered_catalog.empty:
+        st.warning("No exact architectural matches found. Loading full catalog as fallback.")
+        filtered_catalog = df_products
 
     col_p1, col_p2, col_p3 = st.columns(3)
     
     with col_p1:
-        # Step 1: Filter Work Category Scope
-        cat_col = df_products.columns[1] if len(df_products.columns) > 1 else df_products.columns[0]
-        chosen_cat = st.selectbox("Work Category Scope", filtered_catalog_by_type[cat_col].unique())
-        filtered_by_cat = filtered_catalog_by_type[filtered_catalog_by_type[cat_col] == chosen_cat]
+        cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
+        chosen_cat = st.selectbox("Work Category Scope", filtered_catalog[cat_col].unique())
+        filtered_by_cat = filtered_catalog[filtered_catalog[cat_col] == chosen_cat]
         
     with col_p2:
-        # STEP 2: SELECT DESIGN OPTION LINK FIRST
-        option_link_col = df_products.columns[4] if len(df_products.columns) > 4 else df_products.columns[0]
-        chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[option_link_col].unique())
-        filtered_by_link = filtered_by_cat[filtered_by_cat[option_link_col] == chosen_option_link]
+        # Filtered strictly down to relevant options
+        chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[prod_opt_link_col].unique())
+        filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
         
     with col_p3:
-        # STEP 3: SELECT DESIGN TYPE SECOND
-        design_type_col = df_products.columns[3] if len(df_products.columns) > 3 else df_products.columns[0]
+        # Filtered strictly down to relevant types
+        design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
         product_record = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type].iloc[0]
 
     # --- LIVE PRODUCT & ASSET DATA PREVIEW PANEL ---
-    desc_col_text = df_products.columns[6] if len(df_products.columns) > 6 else df_products.columns[-1]
+    prod_id_col = df_products.columns[0]
+    prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
+    desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
     
-    st.markdown("### 🔍 Product & Client Specification Preview")
+    st.markdown("### 🔍 Product Specification Match Preview")
     preview_box = st.container(border=True)
     with preview_box:
         cp1, cp2, cp3, cp4 = st.columns(4)
         cp1.write(f"👤 **Registered Sheet Client:** \n`{db_client_name if db_client_name else 'Unassigned'}`")
-        cp2.write(f"🆔 **Product ID:** \n`{product_record.values[0]}`")
-        cp3.write(f"📐 **Product Area:** \n`{product_record.values[5]} sqm`")
+        cp2.write(f"🆔 **Product ID Match:** \n`{product_record[prod_id_col]}`")
+        cp3.write(f"📐 **Product Area:** \n`{product_record[prod_area_col]} sqm`")
         cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
 
     # Finance / Installment Lookup Context Block
@@ -137,17 +157,18 @@ if df_fact is not None and not df_fact.empty:
             category_rates = df_rates
             
         rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
+        rate_val_col = df_rates.columns[1]
         chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
         rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
 
     # --- COMMERCIAL CALCULATION LOGIC ---
     try:
-        target_item_area = float(product_record.values[5] if len(product_record) > 5 else 0)
+        target_item_area = float(product_record[prod_area_col])
     except:
         target_item_area = 0.0
         
     try:
-        rate_val = str(rate_record.values[1] if len(rate_record) > 1 else 0).replace(',', '').replace('$', '').strip()
+        rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
         unit_base_cost_rate = float(rate_val)
     except:
         unit_base_cost_rate = 0.0
@@ -160,9 +181,9 @@ if df_fact is not None and not df_fact.empty:
 
     if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
         st.session_state.staged_items.append({
-            'Product ID': product_record.values[0],
+            'Product ID': product_record[prod_id_col],
             'Category': chosen_cat,
-            'Description': f"[{product_record.values[3]} - {product_record.values[4]}] {product_record[desc_col_text]}",
+            'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
             'Area (sqm)': target_item_area,
             'Rate Factor': unit_base_cost_rate,
             'Financing Options': chosen_term_option,
