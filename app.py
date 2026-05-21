@@ -25,9 +25,10 @@ def load_all_tabs(base_url):
         clients = pd.read_csv(clients_url)
         terms = pd.read_csv(terms_url)
         
-        # Clean white spaces off column headers and content strings natively
+        # CORE FIX: Destroy all NaN (blank) cells immediately so Python never throws a TypeError
         for df in [facts, products, rates, clients, terms]:
             df.columns = [str(c).strip() for c in df.columns]
+            df.fillna('', inplace=True)
             for col in df.select_dtypes(include=['object']).columns:
                 df[col] = df[col].astype(str).str.strip()
                 
@@ -54,11 +55,9 @@ if 'staged_items' not in st.session_state:
 
 if df_fact is not None and not df_fact.empty:
     
-    # Identify the Unit ID column in the FACT table
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
-    # --- STRICT CLIENT SHEET POSITIONAL LOOKUP ---
-    # Based on your data: Col 1 = Client Name, Col 2 = Project, Col 3 = Unit ID
+    # Strict Client Column Locators
     client_name_col = df_clients.columns[0]
     client_unit_col = df_clients.columns[2] if len(df_clients.columns) > 2 else df_clients.columns[-1]
     
@@ -71,62 +70,67 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        # Create a bulletproof matching string
         safe_selected_unit = str(selected_unit).strip().upper()
-        
-        # Force exact matches by stripping out any hidden Google Sheet formatting
         df_clients['MATCH_ID'] = df_clients[client_unit_col].astype(str).str.strip().str.upper()
         matched_client = df_clients[df_clients['MATCH_ID'] == safe_selected_unit]
         
         db_client_name = ""
         if not matched_client.empty:
             raw_name = matched_client.iloc[0][client_name_col]
-            # Ignore empty/blank cells
-            if str(raw_name).strip().lower() not in ['nan', 'none', '']:
+            if str(raw_name).strip().upper() not in ['NAN', 'NONE', '']:
                 db_client_name = raw_name
                 
         client_name = st.text_input("Client Name Reference", value=str(db_client_name))
 
     # Extract exact unit architectural parameters securely
-    unit_type = unit_meta.get('Unit Type', 'N/A')
-    unit_design_type = unit_meta.get('Design Type', 'N/A')
-    unit_design_opt = unit_meta.get('Design Options', 'N/A')
+    unit_type = unit_meta.get('Unit Type', '')
+    unit_design_type = unit_meta.get('Design Type', '')
+    unit_design_opt = unit_meta.get('Design Options', '')
     unit_bua = unit_meta.get('Built Up Area', 0)
     
-    # Display the specific native design to the user
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Unit Profile", str(unit_type))
-    m2.metric("Native Design Options", str(unit_design_opt))
-    m3.metric("Native Design Type", str(unit_design_type))
+    m1.metric("Unit Profile", str(unit_type) if unit_type else "N/A")
+    m2.metric("Native Design Options", str(unit_design_opt) if unit_design_opt else "N/A")
+    m3.metric("Native Design Type", str(unit_design_type) if unit_design_type else "N/A")
     m4.metric("Built Up Area (BUA)", f"{unit_bua} sqm")
     
     st.divider()
 
-    # --- SECTION 2: CONTEXT-AWARE CASCADING FILTER ---
+    # --- SECTION 2: CUMULATIVE SMART FILTER ---
     st.subheader("2. Add Engineering Option Scope")
     
     # Locate product columns safely
-    prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
     prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
+    design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
+    prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
     
-    target_design_opt = str(unit_design_opt).strip().upper()
     target_unit_type = str(unit_type).strip().upper()
+    target_design_type = str(unit_design_type).strip().upper()
+    target_design_opt = str(unit_design_opt).strip().upper()
     
-    # Filter catalog strictly down to the EXACT Design Option of the selected unit
-    filtered_catalog = df_products[
-        df_products[prod_opt_link_col].astype(str).str.upper().apply(
-            lambda x: target_design_opt in x if target_design_opt and target_design_opt != 'NAN' else False
-        )
-    ]
+    # 1. Base Copy
+    filtered_catalog = df_products.copy()
     
-    # Fallback: If no strict Design Option match exists, filter by general Unit Type
+    # 2. Filter by Unit Type (If applicable)
+    if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
+        mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
+        if mask.any():
+            filtered_catalog = filtered_catalog[mask]
+            
+    # 3. Narrow by Design Type (If applicable)
+    if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
+        mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
+        if mask.any():
+            filtered_catalog = filtered_catalog[mask]
+            
+    # 4. Narrow by Design Option Link (If applicable)
+    if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
+        mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
+        if mask.any():
+            filtered_catalog = filtered_catalog[mask]
+            
     if filtered_catalog.empty:
-        filtered_catalog = df_products[
-            df_products[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
-        ]
-        
-    if filtered_catalog.empty:
-        st.warning("No exact architectural matches found. Loading full catalog as fallback.")
+        st.warning("No specific architectural matches found. Loading full catalog.")
         filtered_catalog = df_products
 
     col_p1, col_p2, col_p3 = st.columns(3)
@@ -141,7 +145,6 @@ if df_fact is not None and not df_fact.empty:
         filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
         
     with col_p3:
-        design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
         product_record = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type].iloc[0]
 
