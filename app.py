@@ -64,9 +64,22 @@ if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
-    # Strict Client Column Locators (Dynamically updated to prevent shift errors)
-    client_name_col = next((c for c in df_clients.columns if 'CLIENT' in str(c).upper() or 'NAME' in str(c).upper()), df_clients.columns[0])
-    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_clients.columns[-1])
+    # Strict Client Column Locators (Dynamically updated to prevent shift errors & collisions)
+    client_cols = list(df_clients.columns)
+    
+    # 1. Try to find precise matches first
+    client_name_col = next((c for c in client_cols if 'CLIENT NAME' in str(c).upper()), None)
+    if not client_name_col:
+        client_name_col = next((c for c in client_cols if 'CLIENT' in str(c).upper() or 'NAME' in str(c).upper()), client_cols[0])
+        
+    client_unit_col = next((c for c in client_cols if 'UNIT ID' in str(c).upper()), None)
+    if not client_unit_col:
+        client_unit_col = next((c for c in client_cols if 'UNIT' in str(c).upper() or 'ID' in str(c).upper()), client_cols[-1])
+        
+    # 2. Collision failsafe: If they accidentally point to the same column, force absolute indexing based on your DB layout
+    if client_name_col == client_unit_col:
+        client_name_col = client_cols[0]
+        client_unit_col = client_cols[2] if len(client_cols) > 2 else client_cols[-1]
     
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
