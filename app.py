@@ -11,6 +11,9 @@ import json
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
+# Hardcoded Webhook URL
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzt5KDoxG9DbYPXzFe7HiYJ6WgYdpsYE65p7Zuwnq6PycZdvbtGyCe_8G1OwwM3cxP/exec"
+
 @st.cache_data(ttl=60)
 def load_all_tabs(base_url):
     try:
@@ -51,9 +54,6 @@ def load_all_tabs(base_url):
 # 2. APPLICATION INTERFACE
 # ==========================================
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
-
-st.sidebar.markdown("### 🔌 API Connections")
-webhook_url = st.sidebar.text_input("Google Apps Script Webhook URL", type="password", help="Paste your deployed Google Apps Script Web App URL here.")
 
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
@@ -287,42 +287,39 @@ if df_fact is not None and not df_fact.empty:
             # ----------------------------------------------------
             with col_export1:
                 if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
-                    if not webhook_url:
-                        st.error("Please enter the Google Apps Script Webhook URL in the sidebar.")
-                    else:
-                        with st.spinner("Transmitting to Google Workspace..."):
-                            # Prepare JSON payload matching what your Apps Script needs
-                            payload = {
-                                "unitId": selected_unit,
-                                "clientName": client_name,
-                                "zone": str(zone_name),
-                                "requestType": "Extra Works Custom Request",
-                                "items": []
-                            }
+                    with st.spinner("Transmitting to Google Workspace..."):
+                        # Prepare JSON payload matching what your Apps Script needs
+                        payload = {
+                            "unitId": selected_unit,
+                            "clientName": client_name,
+                            "zone": str(zone_name),
+                            "requestType": "Extra Works Custom Request",
+                            "items": []
+                        }
+                        
+                        for item in st.session_state.staged_items:
+                            payload["items"].append({
+                                "description": item["Description"],
+                                "unit": "sqm",
+                                "qty": item["Area (sqm)"],
+                                "rate": item["Rate Factor"]
+                            })
                             
-                            for item in st.session_state.staged_items:
-                                payload["items"].append({
-                                    "description": item["Description"],
-                                    "unit": "sqm",
-                                    "qty": item["Area (sqm)"],
-                                    "rate": item["Rate Factor"]
-                                })
-                                
-                            try:
-                                headers = {"Content-Type": "application/json"}
-                                response = requests.post(webhook_url, data=json.dumps(payload), headers=headers)
-                                
-                                if response.status_code == 200:
-                                    response_data = response.json()
-                                    if response_data.get("status") == "success":
-                                        st.success("✅ Quotation Generated Successfully!")
-                                        st.markdown(f"**[📄 Click Here to Open the Generated Google Doc]({response_data.get('docUrl')})**")
-                                    else:
-                                        st.error(f"Apps Script Error: {response_data.get('message')}")
+                        try:
+                            headers = {"Content-Type": "application/json"}
+                            response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                            
+                            if response.status_code == 200:
+                                response_data = response.json()
+                                if response_data.get("status") == "success":
+                                    st.success("✅ Quotation Generated Successfully!")
+                                    st.markdown(f"**[📄 Click Here to Open the Generated Google Doc]({response_data.get('docUrl')})**")
                                 else:
-                                    st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
-                            except Exception as e:
-                                st.error(f"Connection failed: {e}")
+                                    st.error(f"Apps Script Error: {response_data.get('message')}")
+                            else:
+                                st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
+                        except Exception as e:
+                            st.error(f"Connection failed: {e}")
 
             # ----------------------------------------------------
             # STANDARD FPDF EXPORT BUTTON
