@@ -370,7 +370,14 @@ if df_fact is not None and not df_fact.empty:
                         pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                         pdf.ln(2)
                 
-                compiled_pdf_payload = pdf.output(dest="S").encode("latin-1", errors="ignore")
+                # --- FIX FOR FPDF / FPDF2 VERSION CONFLICT ---
+                pdf_out = pdf.output(dest="S")
+                # If it's a string (Legacy FPDF), encode it. If it's a bytearray (Modern FPDF2), just convert to bytes.
+                if isinstance(pdf_out, str):
+                    compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
+                else:
+                    compiled_pdf_payload = bytes(pdf_out)
+                # ---------------------------------------------
                 
                 st.download_button(
                     label="📄 Download Quick PDF Preview",
