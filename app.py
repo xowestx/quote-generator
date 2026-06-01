@@ -106,7 +106,6 @@ if df_fact is not None and not df_fact.empty:
                     
         client_name = st.text_input("Client Name Reference", value=db_client_name)
 
-    # Extract exact unit architectural parameters securely
     unit_type = unit_meta.get('Unit Type', '')
     unit_design_type = unit_meta.get('Design Type', '')
     unit_design_opt = unit_meta.get('Design Options', '')
@@ -295,7 +294,7 @@ if df_fact is not None and not df_fact.empty:
                         "unitId": selected_unit,
                         "clientName": final_client_name,
                         "zone": str(zone_name),
-                        "requestType": "Extra Works Custom Request",
+                        "requestType": "Roof Room", # Updated to specifically request Roof Room terms
                         "items": []
                     }
                     
