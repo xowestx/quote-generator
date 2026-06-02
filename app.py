@@ -29,7 +29,7 @@ def load_all_tabs(base_url):
         rates = get_csv("RATES")
         terms = get_csv("TERMS_%26_CONDITIONS")
         
-        # 🚀 THE FIX: Try CLIENT_NAME first. If Google gives us the FACT tab by mistake, try CLIENT NAME with a space.
+        # Try CLIENT_NAME first. If Google gives us the FACT tab by mistake, try CLIENT NAME with a space.
         clients = get_csv("CLIENT_NAME")
         if not any('NAME' in str(c).upper() or 'CLIENT' in str(c).upper() for c in clients.columns):
             clients = get_csv("CLIENT%20NAME") # Try with a space
@@ -73,6 +73,7 @@ if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
+    # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
@@ -113,7 +114,7 @@ if df_fact is not None and not df_fact.empty:
                 db_client_name = str(raw_name).strip()
                 break
                     
-        client_name = st.text_input("Client Name Reference", value=db_client_name)
+        client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name)
 
     unit_type = unit_meta.get('Unit Type', '')
     unit_design_type = unit_meta.get('Design Type', '')
@@ -129,119 +130,183 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
-    st.subheader("2. Add Engineering Option Scope")
+    # --- SECTION 2: REQUEST TYPE & ENGINEERING SCOPE ---
+    st.subheader("2. Define Engineering Scope")
     
-    prod_id_col = df_products.columns[0]
-    prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
-    design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
-    prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
-    prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
-    desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
+    request_options = [
+        "Roof Room", "Pool Standard", "Pool Customized", "Interior Standard Package", 
+        "Interior Customized Package", "Interior Modification", "Kitchen", "Closets", 
+        "Landscape", "Furniture", "Closing Double Height", "Land Extension", 
+        "Exterior Painting", "Glass House", "Elevator", "A.C", "Shutters", 
+        "Fence & Gates", "Pergola", "Landscape Modifications", "SOG", "Closing Elevator Shaft"
+    ]
     
-    target_unit_type = str(unit_type).strip().upper()
-    target_design_type = str(unit_design_type).strip().upper()
-    target_design_opt = str(unit_design_opt).strip().upper()
+    selected_request_type = st.selectbox("Select Official Request Type", request_options)
     
-    filtered_catalog = df_products.copy()
-    
-    if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
-        mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
-        if mask.any(): filtered_catalog = filtered_catalog[mask]
-            
-    if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
-        mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
-        if mask.any(): filtered_catalog = filtered_catalog[mask]
-            
-    if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
-        mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
-        if mask.any(): filtered_catalog = filtered_catalog[mask]
-            
-    if filtered_catalog.empty:
-        st.warning("No specific architectural matches found. Loading full catalog.")
-        filtered_catalog = df_products
-
-    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
-    
-    with col_p1:
-        cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
-        chosen_cat = st.selectbox("Work Category Scope", filtered_catalog[cat_col].unique())
-        filtered_by_cat = filtered_catalog[filtered_catalog[cat_col] == chosen_cat]
+    # -----------------------------------------------------------
+    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM)
+    # -----------------------------------------------------------
+    if selected_request_type == "Roof Room":
+        st.markdown("### 📚 Database Catalog Entry")
+        prod_id_col = df_products.columns[0]
+        prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
+        design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
+        prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
+        prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
+        desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
         
-    with col_p2:
-        chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[prod_opt_link_col].unique())
-        filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
+        target_unit_type = str(unit_type).strip().upper()
+        target_design_type = str(unit_design_type).strip().upper()
+        target_design_opt = str(unit_design_opt).strip().upper()
         
-    with col_p3:
-        chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
-        filtered_by_design = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type]
+        filtered_catalog = df_products.copy()
         
-    with col_p4:
-        def format_scope(idx):
-            row = filtered_by_design.loc[idx]
-            return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
+        if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
+            mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
+            if mask.any(): filtered_catalog = filtered_catalog[mask]
+                
+        if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
+            mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
+            if mask.any(): filtered_catalog = filtered_catalog[mask]
+                
+        if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
+            mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
+            if mask.any(): filtered_catalog = filtered_catalog[mask]
+                
+        if filtered_catalog.empty:
+            st.warning("No specific architectural matches found. Loading full catalog.")
+            filtered_catalog = df_products
+
+        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+        
+        with col_p1:
+            cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
+            chosen_cat = st.selectbox("Work Category Scope", filtered_catalog[cat_col].unique())
+            filtered_by_cat = filtered_catalog[filtered_catalog[cat_col] == chosen_cat]
             
-        chosen_idx = st.selectbox("Specific Scope Variant", filtered_by_design.index, format_func=format_scope)
-        product_record = filtered_by_design.loc[chosen_idx]
-
-    st.markdown("### 🔍 Product Specification Match Preview")
-    preview_box = st.container(border=True)
-    with preview_box:
-        cp1, cp2, cp3, cp4 = st.columns(4)
-        cp1.write(f"👤 **Registered Sheet Client:** \n`{db_client_name if db_client_name else 'Unassigned'}`")
-        cp2.write(f"🆔 **Product ID Match:** \n`{product_record[prod_id_col]}`")
-        cp3.write(f"📐 **Product Area:** \n`{product_record[prod_area_col]} sqm`")
-        cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
-
-    st.markdown("#### Financing Structure")
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        rate_cat_col = df_rates.columns[0]
-        category_rates = df_rates[df_rates[rate_cat_col].str.upper() == str(chosen_cat).upper()]
-        if category_rates.empty:
-            category_rates = df_rates
+        with col_p2:
+            chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[prod_opt_link_col].unique())
+            filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
             
-        rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
-        rate_val_col = df_rates.columns[1]
-        chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
-        rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
+        with col_p3:
+            chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
+            filtered_by_design = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type]
+            
+        with col_p4:
+            def format_scope(idx):
+                row = filtered_by_design.loc[idx]
+                return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
+                
+            chosen_idx = st.selectbox("Specific Scope Variant", filtered_by_design.index, format_func=format_scope)
+            product_record = filtered_by_design.loc[chosen_idx]
 
-    try:
-        target_item_area = float(product_record[prod_area_col])
-    except:
-        target_item_area = 0.0
+        st.markdown("#### 🔍 Product Specification Match Preview")
+        preview_box = st.container(border=True)
+        with preview_box:
+            cp1, cp2, cp3, cp4 = st.columns(4)
+            cp1.write(f"👤 **Registered Sheet Client:** \n`{db_client_name if db_client_name else 'Unassigned'}`")
+            cp2.write(f"🆔 **Product ID Match:** \n`{product_record[prod_id_col]}`")
+            cp3.write(f"📐 **Product Area:** \n`{product_record[prod_area_col]} sqm`")
+            cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
+
+        st.markdown("#### Financing Structure")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            rate_cat_col = df_rates.columns[0]
+            category_rates = df_rates[df_rates[rate_cat_col].str.upper() == str(chosen_cat).upper()]
+            if category_rates.empty:
+                category_rates = df_rates
+                
+            rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
+            rate_val_col = df_rates.columns[1]
+            chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
+            rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
+
+        try:
+            target_item_qty = float(product_record[prod_area_col])
+        except:
+            target_item_qty = 0.0
+            
+        try:
+            rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
+            unit_base_cost_rate = float(rate_val)
+        except:
+            unit_base_cost_rate = 0.0
+            
+        calculated_line_item_total = target_item_qty * unit_base_cost_rate
+
+        with col_f2:
+            st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
+        st.info(f"📐 **Run Details:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
+
+        if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
+            st.session_state.staged_items.append({
+                'Product ID': product_record[prod_id_col],
+                'Category': chosen_cat,
+                'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
+                'Unit': 'SQM',
+                'QTY': target_item_qty,
+                'Rate Factor': unit_base_cost_rate,
+                'Financing Options': chosen_term_option,
+                'Calculated_Price': calculated_line_item_total
+            })
+            st.toast("Line item pinned successfully.")
+            st.rerun()
+
+    # -----------------------------------------------------------
+    # BRANCH B: MANUAL CUSTOM ENTRY WORKFLOW (ALL OTHER TYPES)
+    # -----------------------------------------------------------
+    else:
+        st.markdown("### 📝 Custom Item Entry Form")
         
-    try:
-        rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
-        unit_base_cost_rate = float(rate_val)
-    except:
-        unit_base_cost_rate = 0.0
+        custom_desc = st.text_area("Description *", help="Long answer text")
         
-    calculated_line_item_total = target_item_area * unit_base_cost_rate
-
-    with col_f2:
-        st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
-    st.info(f"📐 **Run Details:** {target_item_area} sqm × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
-
-    if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
-        st.session_state.staged_items.append({
-            'Product ID': product_record[prod_id_col],
-            'Category': chosen_cat,
-            'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
-            'Area (sqm)': target_item_area,
-            'Rate Factor': unit_base_cost_rate,
-            'Financing Options': chosen_term_option,
-            'Calculated_Price': calculated_line_item_total
-        })
-        st.toast("Line item pinned successfully.")
-        st.rerun()
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            custom_unit_sel = st.selectbox("Unit *", ["SQM", "LM", "NO.", "LS", "Other"])
+            if custom_unit_sel == "Other":
+                custom_unit = st.text_input("Specify Unit *")
+            else:
+                custom_unit = custom_unit_sel
+                
+            custom_qty = st.number_input("QTY *", min_value=0.0, value=1.0, format="%.2f")
+            
+        with col_m2:
+            custom_rate = st.number_input("Rate (EGP) *", min_value=0.0, value=0.0, format="%.2f")
+            
+            # Fetch all available financing options from RATES tab for consistency
+            rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
+            all_financing_opts = df_rates[rate_opt_col].unique()
+            custom_financing = st.selectbox("Financing & Installment Plan", all_financing_opts)
+            
+        custom_total = custom_qty * custom_rate
+        st.info(f"📐 **Run Details:** {custom_qty} {custom_unit} × {custom_rate:,.2f} EGP = **{custom_total:,.2f} EGP**")
+        
+        if st.button("➕ Stage Custom Line Item", use_container_width=True):
+            if not custom_desc.strip():
+                st.warning("⚠️ Please enter a Description before staging the item.")
+            else:
+                st.session_state.staged_items.append({
+                    'Product ID': "CUSTOM",
+                    'Category': selected_request_type,
+                    'Description': custom_desc,
+                    'Unit': custom_unit,
+                    'QTY': custom_qty,
+                    'Rate Factor': custom_rate,
+                    'Financing Options': custom_financing,
+                    'Calculated_Price': custom_total
+                })
+                st.toast("Custom line item pinned successfully.")
+                st.rerun()
 
     st.divider()
 
+    # --- SECTION 3: BOQ BILL OF QUANTITIES SUMMARY & EXPORT GENERATOR ---
     st.subheader("3. Technical Bill of Quantities & Commercial Summary")
     
     if st.session_state.staged_items:
         summary_df = pd.DataFrame(st.session_state.staged_items)
-        st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Area (sqm)', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True)
+        st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True)
         
         aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
         st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
@@ -282,15 +347,15 @@ if df_fact is not None and not df_fact.empty:
                         "unitId": selected_unit,
                         "clientName": final_client_name,
                         "zone": str(zone_name),
-                        "requestType": "Roof Room", # Specifically requested for T&C lookup
+                        "requestType": selected_request_type, 
                         "items": []
                     }
                     
                     for item in st.session_state.staged_items:
                         payload["items"].append({
                             "description": item["Description"],
-                            "unit": "sqm",
-                            "qty": item["Area (sqm)"],
+                            "unit": item["Unit"],
+                            "qty": item["QTY"],
                             "rate": item["Rate Factor"]
                         })
                         
@@ -319,21 +384,25 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
             pdf.cell(0, 10, f"Client Reference Name: {final_client_name}", ln=True)
             pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
+            pdf.cell(0, 10, f"Request Type: {selected_request_type}", ln=True)
             pdf.ln(8)
             
+            # Adjusted PDF Header Widths to accommodate Unit and QTY
             pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(25, 8, "Product ID", border=1)
-            pdf.cell(35, 8, "Category", border=1)
+            pdf.cell(20, 8, "Product ID", border=1)
+            pdf.cell(30, 8, "Category", border=1)
             pdf.cell(75, 8, "Scope Description", border=1)
-            pdf.cell(20, 8, "Area (m2)", border=1)
+            pdf.cell(15, 8, "Unit", border=1)
+            pdf.cell(15, 8, "QTY", border=1)
             pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
             
             pdf.set_font("Helvetica", "", 9)
             for _, item_row in summary_df.iterrows():
-                pdf.cell(25, 8, str(item_row['Product ID']), border=1)
-                pdf.cell(35, 8, str(item_row['Category']), border=1)
+                pdf.cell(20, 8, str(item_row['Product ID']), border=1)
+                pdf.cell(30, 8, str(item_row['Category'])[:15], border=1) # Trim to fit width
                 pdf.cell(75, 8, str(item_row['Description'])[:42], border=1)
-                pdf.cell(20, 8, str(item_row['Area (sqm)']), border=1)
+                pdf.cell(15, 8, str(item_row['Unit']), border=1)
+                pdf.cell(15, 8, str(item_row['QTY']), border=1)
                 pdf.cell(35, 8, f"{item_row['Calculated_Price']:,.2f}", border=1, ln=True)
                 
             pdf.ln(6)
