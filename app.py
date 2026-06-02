@@ -19,17 +19,20 @@ def load_all_tabs(base_url):
     try:
         sheet_id = base_url.split("/d/")[1].split("/")[0]
         
-        fact_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=FACT"
-        products_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=PRODUCTS"
-        rates_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=RATES"
-        clients_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=CLIENT_NAME"
-        terms_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=TERMS_%26_CONDITIONS"
+        # Helper function to grab CSVs safely
+        def get_csv(sheet_name):
+            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+            return pd.read_csv(url)
+            
+        facts = get_csv("FACT")
+        products = get_csv("PRODUCTS")
+        rates = get_csv("RATES")
+        terms = get_csv("TERMS_%26_CONDITIONS")
         
-        facts = pd.read_csv(fact_url)
-        products = pd.read_csv(products_url)
-        rates = pd.read_csv(rates_url)
-        clients = pd.read_csv(clients_url)
-        terms = pd.read_csv(terms_url)
+        # 🚀 THE FIX: Try CLIENT_NAME first. If Google gives us the FACT tab by mistake, try CLIENT NAME with a space.
+        clients = get_csv("CLIENT_NAME")
+        if not any('NAME' in str(c).upper() or 'CLIENT' in str(c).upper() for c in clients.columns):
+            clients = get_csv("CLIENT%20NAME") # Try with a space
         
         # CORE FIX: Destroy all NaN (blank) cells immediately so Python never throws a TypeError
         for df in [facts, products, rates, clients, terms]:
@@ -70,7 +73,6 @@ if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
-    # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
@@ -79,30 +81,37 @@ if df_fact is not None and not df_fact.empty:
         unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
         
     with col_u2:
-        # 🚀 SUPER FUZZY MATCHING LOGIC
         # Strip spaces, dashes, slashes, and underscores to handle ANY typo in the database
         def super_clean(text):
             return re.sub(r'[\s\-_/]+', '', str(text)).upper()
             
         safe_selected_unit = super_clean(selected_unit)
-        
-        # Identify Client Name column reliably
-        client_name_col = next((c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()), df_clients.columns[0])
-        
         db_client_name = ""
-        # Search every single column in the clients sheet for the fuzzy Unit ID
-        for col in df_clients.columns:
-            cleaned_col = df_clients[col].apply(super_clean)
-            matched_rows = df_clients[cleaned_col == safe_selected_unit]
-            
-            if not matched_rows.empty:
-                raw_name = matched_rows.iloc[0][client_name_col]
-                cleaned_raw = super_clean(raw_name)
+        
+        # Safely determine the client name column index
+        name_col_idx = 0 
+        for i, col in enumerate(df_clients.columns):
+            if 'NAME' in str(col).upper() or 'CLIENT' in str(col).upper():
+                name_col_idx = i
+                break
                 
-                # Ensure we didn't just extract the Unit ID or a blank value by accident
-                if cleaned_raw != safe_selected_unit and cleaned_raw not in ['NAN', 'NONE', '']:
-                    db_client_name = str(raw_name).strip()
-                    break # Success! Match found.
+        # Horizontal Row Scanner: Find the unit ID, then grab the name from that exact row
+        for row_idx in range(len(df_clients)):
+            row = df_clients.iloc[row_idx]
+            cleaned_cells = [super_clean(cell) for cell in row]
+            
+            if safe_selected_unit in cleaned_cells:
+                raw_name = row.iloc[name_col_idx]
+                
+                # Failsafe: If the extracted name happens to equal the Unit ID, pick the actual text name
+                if super_clean(raw_name) == safe_selected_unit:
+                    for cell in row:
+                        if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
+                            raw_name = cell
+                            break
+                            
+                db_client_name = str(raw_name).strip()
+                break
                     
         client_name = st.text_input("Client Name Reference", value=db_client_name)
 
@@ -120,10 +129,8 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
-    # --- SECTION 2: CUMULATIVE SMART FILTER ---
     st.subheader("2. Add Engineering Option Scope")
     
-    # Locate product columns safely (moved up for broader access)
     prod_id_col = df_products.columns[0]
     prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
     design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
@@ -135,32 +142,24 @@ if df_fact is not None and not df_fact.empty:
     target_design_type = str(unit_design_type).strip().upper()
     target_design_opt = str(unit_design_opt).strip().upper()
     
-    # 1. Base Copy
     filtered_catalog = df_products.copy()
     
-    # 2. Filter by Unit Type (If applicable)
     if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
         mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
-        if mask.any():
-            filtered_catalog = filtered_catalog[mask]
+        if mask.any(): filtered_catalog = filtered_catalog[mask]
             
-    # 3. Narrow by Design Type (If applicable)
     if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
         mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
-        if mask.any():
-            filtered_catalog = filtered_catalog[mask]
+        if mask.any(): filtered_catalog = filtered_catalog[mask]
             
-    # 4. Narrow by Design Option Link (If applicable)
     if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
         mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
-        if mask.any():
-            filtered_catalog = filtered_catalog[mask]
+        if mask.any(): filtered_catalog = filtered_catalog[mask]
             
     if filtered_catalog.empty:
         st.warning("No specific architectural matches found. Loading full catalog.")
         filtered_catalog = df_products
 
-    # 4-Column Layout to include the Specific Variant Selection
     col_p1, col_p2, col_p3, col_p4 = st.columns(4)
     
     with col_p1:
@@ -177,7 +176,6 @@ if df_fact is not None and not df_fact.empty:
         filtered_by_design = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type]
         
     with col_p4:
-        # Create a display format combining Area and Description for pinpoint product selection
         def format_scope(idx):
             row = filtered_by_design.loc[idx]
             return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
@@ -185,7 +183,6 @@ if df_fact is not None and not df_fact.empty:
         chosen_idx = st.selectbox("Specific Scope Variant", filtered_by_design.index, format_func=format_scope)
         product_record = filtered_by_design.loc[chosen_idx]
 
-    # --- LIVE PRODUCT & ASSET DATA PREVIEW PANEL ---
     st.markdown("### 🔍 Product Specification Match Preview")
     preview_box = st.container(border=True)
     with preview_box:
@@ -195,7 +192,6 @@ if df_fact is not None and not df_fact.empty:
         cp3.write(f"📐 **Product Area:** \n`{product_record[prod_area_col]} sqm`")
         cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
 
-    # Finance / Installment Lookup Context Block
     st.markdown("#### Financing Structure")
     col_f1, col_f2 = st.columns(2)
     with col_f1:
@@ -209,7 +205,6 @@ if df_fact is not None and not df_fact.empty:
         chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
         rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
 
-    # --- COMMERCIAL CALCULATION LOGIC ---
     try:
         target_item_area = float(product_record[prod_area_col])
     except:
@@ -242,7 +237,6 @@ if df_fact is not None and not df_fact.empty:
 
     st.divider()
 
-    # --- SECTION 3: BOQ BILL OF QUANTITIES SUMMARY & EXPORT GENERATOR ---
     st.subheader("3. Technical Bill of Quantities & Commercial Summary")
     
     if st.session_state.staged_items:
@@ -252,7 +246,6 @@ if df_fact is not None and not df_fact.empty:
         aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
         st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
         
-        # --- NEW FEATURE: INDIVIDUAL ITEM DELETION ---
         st.markdown("##### Manage Staged Items")
         del_col1, del_col2, del_col3 = st.columns([2, 1, 1])
         with del_col1:
@@ -262,7 +255,7 @@ if df_fact is not None and not df_fact.empty:
                 format_func=lambda x: f"{st.session_state.staged_items[x]['Product ID']} - {st.session_state.staged_items[x]['Category']}"
             )
         with del_col2:
-            st.write("") # Spacing to align with selectbox
+            st.write("") 
             st.write("")
             if st.button("🗑️ Remove Selected Item", use_container_width=True):
                 st.session_state.staged_items.pop(item_to_remove)
@@ -276,25 +269,20 @@ if df_fact is not None and not df_fact.empty:
                 st.rerun()
                 
         st.divider()
-        # ---------------------------------------------
         
-        # Allow export even if client name is empty
+        # Ensure client name defaults properly if left entirely blank by user
         final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
         
         col_export1, col_export2 = st.columns(2)
         
-        # ----------------------------------------------------
-        # WEBHOOK EXPORT BUTTON (GOOGLE DOCS)
-        # ----------------------------------------------------
         with col_export1:
             if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
                 with st.spinner("Transmitting to Google Workspace..."):
-                    # Prepare JSON payload matching what your Apps Script needs
                     payload = {
                         "unitId": selected_unit,
                         "clientName": final_client_name,
                         "zone": str(zone_name),
-                        "requestType": "Roof Room", # Updated to specifically request Roof Room terms
+                        "requestType": "Roof Room", # Specifically requested for T&C lookup
                         "items": []
                     }
                     
@@ -322,9 +310,6 @@ if df_fact is not None and not df_fact.empty:
                     except Exception as e:
                         st.error(f"Connection failed: {e}")
 
-        # ----------------------------------------------------
-        # STANDARD FPDF EXPORT BUTTON
-        # ----------------------------------------------------
         with col_export2:
             pdf = FPDF()
             pdf.add_page()
@@ -356,7 +341,6 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
             pdf.ln(6)
             
-            # Dynamic Legal Contract Terms Appender Block
             pdf.set_font("Helvetica", "B", 11)
             pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
             pdf.set_font("Helvetica", "", 8)
@@ -371,14 +355,12 @@ if df_fact is not None and not df_fact.empty:
                     pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                     pdf.ln(2)
             
-            # --- FIX FOR FPDF / FPDF2 VERSION CONFLICT ---
             pdf_out = pdf.output(dest="S")
-            # If it's a string (Legacy FPDF), encode it. If it's a bytearray (Modern FPDF2), just convert to bytes.
+            # FPDF2 vs Legacy FPDF check to prevent AttributeError
             if isinstance(pdf_out, str):
                 compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
             else:
                 compiled_pdf_payload = bytes(pdf_out)
-            # ---------------------------------------------
             
             st.download_button(
                 label="📄 Download Quick PDF Preview",
