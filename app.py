@@ -225,6 +225,8 @@ if df_fact is not None and not df_fact.empty:
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
 
+        # Re-initialize the columns so col_f2 exists for the metric display
+        col_f1, col_f2 = st.columns(2)
         with col_f2:
             st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
         st.info(f"📐 **Calculation Base:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
