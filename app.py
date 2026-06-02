@@ -157,16 +157,16 @@ if df_fact is not None and not df_fact.empty:
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
     
     # -----------------------------------------------------------
-    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM)
+    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM) - SIMPLIFIED
     # -----------------------------------------------------------
     if selected_request_type == "Roof Room":
-        st.markdown("### 📚 Database Catalog Entry")
         prod_id_col = df_products.columns[0]
         prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
         design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
         prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
         desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
+        cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
         
         target_unit_type = str(unit_type).strip().upper()
         target_design_type = str(unit_design_type).strip().upper()
@@ -187,46 +187,23 @@ if df_fact is not None and not df_fact.empty:
             if mask.any(): filtered_catalog = filtered_catalog[mask]
                 
         if filtered_catalog.empty:
-            st.warning("No specific architectural matches found. Loading full catalog.")
             filtered_catalog = df_products
 
-        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+        # Simplified UI Layout
+        col_vr, col_fin = st.columns([2, 1])
         
-        with col_p1:
-            cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
-            chosen_cat = st.selectbox("Work Category Scope", filtered_catalog[cat_col].unique())
-            filtered_by_cat = filtered_catalog[filtered_catalog[cat_col] == chosen_cat]
-            
-        with col_p2:
-            chosen_option_link = st.selectbox("Design Option Link Specification", filtered_by_cat[prod_opt_link_col].unique())
-            filtered_by_link = filtered_by_cat[filtered_by_cat[prod_opt_link_col] == chosen_option_link]
-            
-        with col_p3:
-            chosen_design_type = st.selectbox("Design Type Grouping", filtered_by_link[design_type_col].unique())
-            filtered_by_design = filtered_by_link[filtered_by_link[design_type_col] == chosen_design_type]
-            
-        with col_p4:
+        with col_vr:
             def format_scope(idx):
-                row = filtered_by_design.loc[idx]
+                row = filtered_catalog.loc[idx]
                 return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
                 
-            chosen_idx = st.selectbox("Specific Scope Variant", filtered_by_design.index, format_func=format_scope)
-            product_record = filtered_by_design.loc[chosen_idx]
+            chosen_idx = st.selectbox("Specific Scope Variant", filtered_catalog.index, format_func=format_scope)
+            product_record = filtered_catalog.loc[chosen_idx]
+            chosen_cat = str(product_record.get(cat_col, "Roof Room"))
 
-        st.markdown("#### 🔍 Product Specification Match Preview")
-        preview_box = st.container(border=True)
-        with preview_box:
-            cp1, cp2, cp3, cp4 = st.columns(4)
-            cp1.write(f"👤 **Registered Sheet Client:** \n`{db_client_name if db_client_name else 'Unassigned'}`")
-            cp2.write(f"🆔 **Product ID Match:** \n`{product_record[prod_id_col]}`")
-            cp3.write(f"📐 **Product Area:** \n`{product_record[prod_area_col]} sqm`")
-            cp4.write(f"📝 **Scope Variant:** \n{product_record[desc_col_text]}")
-
-        st.markdown("#### Financing Structure")
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
+        with col_fin:
             rate_cat_col = df_rates.columns[0]
-            category_rates = df_rates[df_rates[rate_cat_col].str.upper() == str(chosen_cat).upper()]
+            category_rates = df_rates[df_rates[rate_cat_col].str.upper() == chosen_cat.upper()]
             if category_rates.empty:
                 category_rates = df_rates
                 
@@ -248,23 +225,19 @@ if df_fact is not None and not df_fact.empty:
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
 
-        with col_f2:
-            st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
-        st.info(f"📐 **Run Details:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
+        st.metric("Total Quotation Capital Sum (EGP)", f"{calculated_line_item_total:,.2f} EGP")
 
-        if st.button("➕ Stage Engineering Line Item to Scope Summary", use_container_width=True):
-            st.session_state.staged_items.append({
-                'Product ID': product_record[prod_id_col],
-                'Category': chosen_cat,
-                'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
-                'Unit': 'SQM',
-                'QTY': target_item_qty,
-                'Rate Factor': unit_base_cost_rate,
-                'Financing Options': chosen_term_option,
-                'Calculated_Price': calculated_line_item_total
-            })
-            st.toast("Line item pinned successfully.")
-            st.rerun()
+        # Background staging - Bypasses manual '+' button entirely
+        st.session_state.staged_items = [{
+            'Product ID': product_record[prod_id_col],
+            'Category': chosen_cat,
+            'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
+            'Unit': 'SQM',
+            'QTY': target_item_qty,
+            'Rate Factor': unit_base_cost_rate,
+            'Financing Options': chosen_term_option,
+            'Calculated_Price': calculated_line_item_total
+        }]
 
     # -----------------------------------------------------------
     # BRANCH B: MANUAL CUSTOM ENTRY WORKFLOW (ALL OTHER TYPES)
@@ -314,42 +287,48 @@ if df_fact is not None and not df_fact.empty:
 
     st.divider()
 
-    # --- SECTION 3: BOQ BILL OF QUANTITIES SUMMARY & EXPORT GENERATOR ---
-    st.subheader("3. Technical Bill of Quantities & Commercial Summary")
-    
+    # --- SECTION 3: BOQ BILL OF QUANTITIES SUMMARY (ONLY FOR NON-ROOF ROOM ITEMS) ---
+    if selected_request_type != "Roof Room":
+        st.subheader("3. Technical Bill of Quantities & Commercial Summary")
+        
+        if st.session_state.staged_items:
+            summary_df = pd.DataFrame(st.session_state.staged_items)
+            st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True)
+            
+            aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
+            st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
+            
+            st.markdown("##### Manage Staged Items")
+            del_col1, del_col2, del_col3 = st.columns([2, 1, 1])
+            with del_col1:
+                item_to_remove = st.selectbox(
+                    "Select Line Item to Remove", 
+                    range(len(st.session_state.staged_items)), 
+                    format_func=lambda x: f"{st.session_state.staged_items[x]['Product ID']} - {st.session_state.staged_items[x]['Category']}"
+                )
+            with del_col2:
+                st.write("") 
+                st.write("")
+                if st.button("🗑️ Remove Selected Item", use_container_width=True):
+                    st.session_state.staged_items.pop(item_to_remove)
+                    st.toast("Item removed from BOQ.")
+                    st.rerun()
+            with del_col3:
+                st.write("") 
+                st.write("")
+                if st.button("❌ Reset Entire BOQ", type="secondary", use_container_width=True):
+                    st.session_state.staged_items = []
+                    st.rerun()
+            st.divider()
+        else:
+            st.write("No active engineering metrics currently staged inside calculation layout.")
+            
+    # --- EXPORT BUTTONS (SHARED FOR BOTH PATHS) ---
     if st.session_state.staged_items:
-        summary_df = pd.DataFrame(st.session_state.staged_items)
-        st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True)
-        
-        aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
-        st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
-        
-        st.markdown("##### Manage Staged Items")
-        del_col1, del_col2, del_col3 = st.columns([2, 1, 1])
-        with del_col1:
-            item_to_remove = st.selectbox(
-                "Select Line Item to Remove", 
-                range(len(st.session_state.staged_items)), 
-                format_func=lambda x: f"{st.session_state.staged_items[x]['Product ID']} - {st.session_state.staged_items[x]['Category']}"
-            )
-        with del_col2:
-            st.write("") 
-            st.write("")
-            if st.button("🗑️ Remove Selected Item", use_container_width=True):
-                st.session_state.staged_items.pop(item_to_remove)
-                st.toast("Item removed from BOQ.")
-                st.rerun()
-        with del_col3:
-            st.write("") 
-            st.write("")
-            if st.button("❌ Reset Entire BOQ", type="secondary", use_container_width=True):
-                st.session_state.staged_items = []
-                st.rerun()
-                
-        st.divider()
-        
-        # Ensure client name defaults properly if left entirely blank by user
         final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
+        
+        summary_df = pd.DataFrame(st.session_state.staged_items)
+        aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
         
         col_export1, col_export2 = st.columns(2)
         
@@ -451,7 +430,5 @@ if df_fact is not None and not df_fact.empty:
                 mime="application/pdf",
                 use_container_width=True
             )
-    else:
-        st.write("No active engineering metrics currently staged inside calculation layout.")
 else:
     st.info("Awaiting structural backend database connection strings...")
