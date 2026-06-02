@@ -225,16 +225,21 @@ if df_fact is not None and not df_fact.empty:
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
 
-        st.metric("Total Quotation Capital Sum (EGP)", f"{calculated_line_item_total:,.2f} EGP")
+        with col_f2:
+            st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
+        st.info(f"📐 **Calculation Base:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
 
         # Background staging - Bypasses manual '+' button entirely
+        # Generates standardized Description and converts to Lump Sum (LS) format
+        custom_roof_description = f'Required Fees for adding {target_item_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
+        
         st.session_state.staged_items = [{
             'Product ID': product_record[prod_id_col],
             'Category': chosen_cat,
-            'Description': f"[{product_record[design_type_col]} - {product_record[prod_opt_link_col]}] {product_record[desc_col_text]}",
-            'Unit': 'SQM',
-            'QTY': target_item_qty,
-            'Rate Factor': unit_base_cost_rate,
+            'Description': custom_roof_description,
+            'Unit': 'LS',
+            'QTY': 1.0,
+            'Rate Factor': calculated_line_item_total,
             'Financing Options': chosen_term_option,
             'Calculated_Price': calculated_line_item_total
         }]
