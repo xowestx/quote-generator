@@ -72,14 +72,27 @@ if 'staged_items' not in st.session_state:
 if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
+    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_clients.columns[-1] if not df_clients.empty else None)
     
     # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        selected_unit = st.selectbox("Select Unit ID", df_fact[fact_unit_id_col].unique())
-        unit_meta = df_fact[df_fact[fact_unit_id_col] == selected_unit].iloc[0]
+        # Use CLIENT_NAME tab for the dropdown list, filtering out empty/NaNs
+        if client_unit_col:
+            valid_units = [u for u in df_clients[client_unit_col].unique() if str(u).strip() and str(u).strip().upper() not in ['NAN', 'NONE']]
+        else:
+            valid_units = df_fact[fact_unit_id_col].unique()
+        
+        # Sort the list alphabetically for easier navigation
+        valid_units = sorted(list(set(valid_units)), key=lambda x: str(x))
+        
+        selected_unit = st.selectbox("Select Unit ID", valid_units)
+        
+        # Fetch unit metadata from FACT tab safely (in case client is missing from FACT)
+        unit_meta_df = df_fact[df_fact[fact_unit_id_col] == selected_unit]
+        unit_meta = unit_meta_df.iloc[0] if not unit_meta_df.empty else {}
         
     with col_u2:
         # Strip spaces, dashes, slashes, and underscores to handle ANY typo in the database
