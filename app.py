@@ -257,7 +257,7 @@ if df_fact is not None and not df_fact.empty:
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Type smoothly on the left! The read-only preview table on the right calculates your 'No.' and 'Total Amount' instantly.")
+        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
         # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
@@ -269,8 +269,8 @@ if df_fact is not None and not df_fact.empty:
             }])
             st.session_state.last_type = selected_request_type
         
-        # Split layout to show Editor and Preview side-by-side
-        col_editor, col_preview = st.columns([3.5, 1.5])
+        # Split layout to show No. Preview, Editor, and Total Preview side-by-side
+        col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
         
         with col_editor:
             # Interactive grid with ONLY the editable columns to ensure 100% stable input
@@ -295,14 +295,24 @@ if df_fact is not None and not df_fact.empty:
         final_df['Total Amount'] = final_df['QTY'] * final_df['Rate']
         final_df.insert(0, 'No.', range(1, len(final_df) + 1))
         
-        with col_preview:
-            # Display read-only calculation next to the editor so it doesn't cause typing lag
+        with col_no:
+            # Display read-only No. calculation on the left side of the editor
             st.dataframe(
-                final_df[['No.', 'Total Amount']],
+                final_df[['No.']],
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "No.": st.column_config.NumberColumn("No."),
+                    "No.": st.column_config.NumberColumn("No.")
+                }
+            )
+
+        with col_total:
+            # Display read-only calculation next to the right side of the editor
+            st.dataframe(
+                final_df[['Total Amount']],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
                     "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")
                 }
             )
