@@ -337,9 +337,12 @@ if df_fact is not None and not df_fact.empty:
         vat = subtotal * 0.14
         total_with_vat = subtotal + vat
         
-        col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+        if selected_request_type == "Land Extension":
+            st.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        else:
+            col_t1, col_t2 = st.columns(2)
+            col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+            col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     st.divider()
 
@@ -418,7 +421,10 @@ if df_fact is not None and not df_fact.empty:
             pdf.ln(6)
             pdf.set_font("Helvetica", "B", 11)
             pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
-            pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
+            
+            if selected_request_type != "Land Extension":
+                pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
+                
             pdf.ln(4)
             
             # Terms and Conditions (Only pulls if Financing Options exists on Roof Room)
