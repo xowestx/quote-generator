@@ -261,12 +261,23 @@ if df_fact is not None and not df_fact.empty:
         
         # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
-            st.session_state.custom_boq_data = pd.DataFrame([{
-                'Description': '',
-                'Unit': 'LS',
-                'QTY': 1.0,
-                'Rate': 0.0
-            }])
+            # --- SPECIAL HANDLING FOR LAND EXTENSION ---
+            if selected_request_type == "Land Extension":
+                initial_data = [{
+                    'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
+                    'Unit': 'M2',
+                    'QTY': 0.0,  # User types the actual area here
+                    'Rate': 55000.0  # Fixed standard rate
+                }]
+            else:
+                initial_data = [{
+                    'Description': '',
+                    'Unit': 'LS',
+                    'QTY': 1.0,
+                    'Rate': 0.0
+                }]
+            
+            st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
         
         # Split layout to show No. Preview, Editor, and Total Preview side-by-side
@@ -282,7 +293,7 @@ if df_fact is not None and not df_fact.empty:
                 hide_index=True,
                 column_config={
                     "Description": st.column_config.TextColumn("Description"),
-                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "LM", "NO.", "LS", "Other"], default="LS"),
+                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"),
                     "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
                     "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
                 }
