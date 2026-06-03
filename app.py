@@ -6,6 +6,7 @@ import re
 import requests
 import json
 
+# STREAMLING_CHUNK:Initializing configurations and data loaders
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
@@ -53,6 +54,7 @@ def load_all_tabs(base_url):
         st.error(f"Error accessing Google Sheet tabs. Details: {e}")
         return None, None, None, None, None
 
+# STREAMLING_CHUNK:Configuring the UI and Asset Context section
 # ==========================================
 # 2. APPLICATION INTERFACE
 # ==========================================
@@ -143,6 +145,7 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
+    # STREAMLING_CHUNK:Rendering Request Type logic and Database paths
     # --- SECTION 2: REQUEST TYPE & ENGINEERING SCOPE ---
     st.subheader("2. Define Engineering Scope")
     
@@ -157,7 +160,7 @@ if df_fact is not None and not df_fact.empty:
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
     
     # -----------------------------------------------------------
-    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM) - SIMPLIFIED
+    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM ONLY)
     # -----------------------------------------------------------
     if selected_request_type == "Roof Room":
         prod_id_col = df_products.columns[0]
@@ -189,7 +192,7 @@ if df_fact is not None and not df_fact.empty:
         if filtered_catalog.empty:
             filtered_catalog = df_products
 
-        # Simplified UI Layout
+        # Simplified UI Layout for Roof Room
         col_vr, col_fin = st.columns([2, 1])
         
         with col_vr:
@@ -197,7 +200,7 @@ if df_fact is not None and not df_fact.empty:
                 row = filtered_catalog.loc[idx]
                 return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
                 
-            chosen_idx = st.selectbox("Specific Scope Variant", filtered_catalog.index, format_func=format_scope)
+            chosen_idx = st.selectbox("Select Roof Room Variant", filtered_catalog.index, format_func=format_scope)
             product_record = filtered_catalog.loc[chosen_idx]
             chosen_cat = str(product_record.get(cat_col, "Roof Room"))
 
@@ -225,10 +228,10 @@ if df_fact is not None and not df_fact.empty:
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
 
-        # Re-initialize the columns so col_f2 exists for the metric display
+        # Ensure col_f2 exists so the metric isn't orphaned
         col_f1, col_f2 = st.columns(2)
         with col_f2:
-            st.metric("Dynamic Price Run Calculation", f"{calculated_line_item_total:,.2f} EGP")
+            st.metric("Total Quotation Capital Sum (EGP)", f"{calculated_line_item_total:,.2f} EGP")
         st.info(f"📐 **Calculation Base:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
 
         # Background staging - Bypasses manual '+' button entirely
@@ -245,98 +248,81 @@ if df_fact is not None and not df_fact.empty:
             'Financing Options': chosen_term_option,
             'Calculated_Price': calculated_line_item_total
         }]
+        
+        # Display the static BOQ summary for Roof Rooms
+        st.markdown("### 📊 Generated BOQ Summary")
+        summary_df = pd.DataFrame(st.session_state.staged_items)
+        st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True, hide_index=True)
+        aggregate_commercial_sum = calculated_line_item_total
 
+    # STREAMLING_CHUNK:Rendering Custom Item Data Editor Grid
     # -----------------------------------------------------------
-    # BRANCH B: MANUAL CUSTOM ENTRY WORKFLOW (ALL OTHER TYPES)
+    # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
     # -----------------------------------------------------------
     else:
-        st.markdown("### 📝 Custom Item Entry Form")
+        st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
+        st.info("💡 **Tip:** Type directly into the table below. Add new rows using the blank row at the bottom, or select a row and press `Delete` to remove it.")
         
-        custom_desc = st.text_area("Description *", help="Long answer text")
+        # Initialize default row if list is empty or coming from Roof Room
+        if not st.session_state.staged_items or st.session_state.staged_items[0].get('Category') == 'Roof Room':
+            st.session_state.staged_items = [{
+                'Product ID': 'CUSTOM',
+                'Category': selected_request_type,
+                'Description': '',
+                'Unit': 'LS',
+                'QTY': 1.0,
+                'Rate Factor': 0.0,
+                'Financing Options': 'Cash',
+                'Calculated_Price': 0.0
+            }]
+            
+        df_to_edit = pd.DataFrame(st.session_state.staged_items)
         
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            custom_unit_sel = st.selectbox("Unit *", ["SQM", "LM", "NO.", "LS", "Other"])
-            if custom_unit_sel == "Other":
-                custom_unit = st.text_input("Specify Unit *")
-            else:
-                custom_unit = custom_unit_sel
-                
-            custom_qty = st.number_input("QTY *", min_value=0.0, value=1.0, format="%.2f")
+        # Get financing options for the dropdown in the grid
+        rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
+        all_financing_opts = df_rates[rate_opt_col].unique().tolist()
+        if 'Cash' not in all_financing_opts:
+            all_financing_opts.append('Cash')
             
-        with col_m2:
-            custom_rate = st.number_input("Rate (EGP) *", min_value=0.0, value=0.0, format="%.2f")
-            
-            # Fetch all available financing options from RATES tab for consistency
-            rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
-            all_financing_opts = df_rates[rate_opt_col].unique()
-            custom_financing = st.selectbox("Financing & Installment Plan", all_financing_opts)
-            
-        custom_total = custom_qty * custom_rate
-        st.info(f"📐 **Run Details:** {custom_qty} {custom_unit} × {custom_rate:,.2f} EGP = **{custom_total:,.2f} EGP**")
+        # Display the interactive grid
+        edited_df = st.data_editor(
+            df_to_edit,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Product ID": st.column_config.TextColumn("Product ID", default="CUSTOM"),
+                "Category": st.column_config.TextColumn("Category", default=selected_request_type),
+                "Description": st.column_config.TextColumn("Description"),
+                "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "LM", "NO.", "LS", "Other"], default="LS"),
+                "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
+                "Rate Factor": st.column_config.NumberColumn("Rate Factor", min_value=0.0, default=0.0),
+                "Financing Options": st.column_config.SelectboxColumn("Financing Options", options=all_financing_opts),
+                "Calculated_Price": st.column_config.NumberColumn("Calculated_Price", disabled=True)
+            }
+        )
         
-        if st.button("➕ Stage Custom Line Item", use_container_width=True):
-            if not custom_desc.strip():
-                st.warning("⚠️ Please enter a Description before staging the item.")
-            else:
-                st.session_state.staged_items.append({
-                    'Product ID': "CUSTOM",
-                    'Category': selected_request_type,
-                    'Description': custom_desc,
-                    'Unit': custom_unit,
-                    'QTY': custom_qty,
-                    'Rate Factor': custom_rate,
-                    'Financing Options': custom_financing,
-                    'Calculated_Price': custom_total
-                })
-                st.toast("Custom line item pinned successfully.")
-                st.rerun()
+        # Recalculate Totals automatically based on grid edits
+        edited_df['QTY'] = pd.to_numeric(edited_df['QTY'], errors='coerce').fillna(0.0)
+        edited_df['Rate Factor'] = pd.to_numeric(edited_df['Rate Factor'], errors='coerce').fillna(0.0)
+        edited_df['Calculated_Price'] = edited_df['QTY'] * edited_df['Rate Factor']
+        
+        # Save back to state so it persists for the exporter
+        st.session_state.staged_items = edited_df.to_dict('records')
+        summary_df = edited_df
+        
+        aggregate_commercial_sum = edited_df['Calculated_Price'].sum()
+        st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
 
     st.divider()
 
-    # --- SECTION 3: BOQ BILL OF QUANTITIES SUMMARY (ONLY FOR NON-ROOF ROOM ITEMS) ---
-    if selected_request_type != "Roof Room":
-        st.subheader("3. Technical Bill of Quantities & Commercial Summary")
-        
-        if st.session_state.staged_items:
-            summary_df = pd.DataFrame(st.session_state.staged_items)
-            st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True)
-            
-            aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
-            st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
-            
-            st.markdown("##### Manage Staged Items")
-            del_col1, del_col2, del_col3 = st.columns([2, 1, 1])
-            with del_col1:
-                item_to_remove = st.selectbox(
-                    "Select Line Item to Remove", 
-                    range(len(st.session_state.staged_items)), 
-                    format_func=lambda x: f"{st.session_state.staged_items[x]['Product ID']} - {st.session_state.staged_items[x]['Category']}"
-                )
-            with del_col2:
-                st.write("") 
-                st.write("")
-                if st.button("🗑️ Remove Selected Item", use_container_width=True):
-                    st.session_state.staged_items.pop(item_to_remove)
-                    st.toast("Item removed from BOQ.")
-                    st.rerun()
-            with del_col3:
-                st.write("") 
-                st.write("")
-                if st.button("❌ Reset Entire BOQ", type="secondary", use_container_width=True):
-                    st.session_state.staged_items = []
-                    st.rerun()
-            st.divider()
-        else:
-            st.write("No active engineering metrics currently staged inside calculation layout.")
-            
-    # --- EXPORT BUTTONS (SHARED FOR BOTH PATHS) ---
-    if st.session_state.staged_items:
+    # STREAMLING_CHUNK:Generating Document Exports
+    # --- SECTION 3: EXPORT BUTTONS (SHARED) ---
+    if st.session_state.staged_items and not summary_df.empty:
+        # Ensure client name defaults properly if left entirely blank by user
         final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
         
-        summary_df = pd.DataFrame(st.session_state.staged_items)
-        aggregate_commercial_sum = summary_df['Calculated_Price'].sum()
-        
+        st.markdown("##### Finalize Document Details")
         col_export1, col_export2 = st.columns(2)
         
         with col_export1:
