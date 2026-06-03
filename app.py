@@ -6,7 +6,6 @@ import re
 import requests
 import json
 
-# STREAMLING_CHUNK:Initializing configurations and data loaders
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
@@ -54,7 +53,6 @@ def load_all_tabs(base_url):
         st.error(f"Error accessing Google Sheet tabs. Details: {e}")
         return None, None, None, None, None
 
-# STREAMLING_CHUNK:Configuring the UI and Asset Context section
 # ==========================================
 # 2. APPLICATION INTERFACE
 # ==========================================
@@ -69,6 +67,10 @@ st.title("🏗️ Extra Works Quotation Engine")
 df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 
 if 'staged_items' not in st.session_state:
+    st.session_state.staged_items = []
+
+# Fallback clear if old schema exists to prevent crashes
+if st.session_state.staged_items and 'Calculated_Price' in st.session_state.staged_items[0]:
     st.session_state.staged_items = []
 
 if df_fact is not None and not df_fact.empty:
@@ -92,26 +94,23 @@ if df_fact is not None and not df_fact.empty:
         
         selected_unit = st.selectbox("Select Unit ID", valid_units)
         
-        # Fetch unit metadata from FACT tab safely (in case client is missing from FACT)
+        # Fetch unit metadata from FACT tab safely
         unit_meta_df = df_fact[df_fact[fact_unit_id_col] == selected_unit]
         unit_meta = unit_meta_df.iloc[0] if not unit_meta_df.empty else {}
         
     with col_u2:
-        # Strip spaces, dashes, slashes, and underscores to handle ANY typo in the database
         def super_clean(text):
             return re.sub(r'[\s\-_/]+', '', str(text)).upper()
             
         safe_selected_unit = super_clean(selected_unit)
         db_client_name = ""
         
-        # Safely determine the client name column index
         name_col_idx = 0 
         for i, col in enumerate(df_clients.columns):
             if 'NAME' in str(col).upper() or 'CLIENT' in str(col).upper():
                 name_col_idx = i
                 break
                 
-        # Horizontal Row Scanner: Find the unit ID, then grab the name from that exact row
         for row_idx in range(len(df_clients)):
             row = df_clients.iloc[row_idx]
             cleaned_cells = [super_clean(cell) for cell in row]
@@ -119,7 +118,6 @@ if df_fact is not None and not df_fact.empty:
             if safe_selected_unit in cleaned_cells:
                 raw_name = row.iloc[name_col_idx]
                 
-                # Failsafe: If the extracted name happens to equal the Unit ID, pick the actual text name
                 if super_clean(raw_name) == safe_selected_unit:
                     for cell in row:
                         if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
@@ -145,7 +143,6 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
-    # STREAMLING_CHUNK:Rendering Request Type logic and Database paths
     # --- SECTION 2: REQUEST TYPE & ENGINEERING SCOPE ---
     st.subheader("2. Define Engineering Scope")
     
@@ -163,10 +160,6 @@ if df_fact is not None and not df_fact.empty:
     # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM ONLY)
     # -----------------------------------------------------------
     if selected_request_type == "Roof Room":
-        prod_id_col = df_products.columns[0]
-        prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
-        design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
-        prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
         prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
         desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
         cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
@@ -176,6 +169,11 @@ if df_fact is not None and not df_fact.empty:
         target_design_opt = str(unit_design_opt).strip().upper()
         
         filtered_catalog = df_products.copy()
+        
+        # Filtering logic...
+        prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
+        design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
+        prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
         
         if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
             mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
@@ -192,7 +190,7 @@ if df_fact is not None and not df_fact.empty:
         if filtered_catalog.empty:
             filtered_catalog = df_products
 
-        # Simplified UI Layout for Roof Room
+        # UI Layout for Roof Room
         col_vr, col_fin = st.columns([2, 1])
         
         with col_vr:
@@ -227,35 +225,33 @@ if df_fact is not None and not df_fact.empty:
             unit_base_cost_rate = 0.0
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
-
-        # Ensure col_f2 exists so the metric isn't orphaned
-        col_f1, col_f2 = st.columns(2)
-        with col_f2:
-            st.metric("Total Quotation Capital Sum (EGP)", f"{calculated_line_item_total:,.2f} EGP")
-        st.info(f"📐 **Calculation Base:** {target_item_qty} SQM × {unit_base_cost_rate:,.2f} EGP = **{calculated_line_item_total:,.2f} EGP**")
-
-        # Background staging - Bypasses manual '+' button entirely
-        # Generates standardized Description and converts to Lump Sum (LS) format
+        
         custom_roof_description = f'Required Fees for adding {target_item_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
         
+        # Save exact format needed for PDF and Webhook
         st.session_state.staged_items = [{
-            'Product ID': product_record[prod_id_col],
-            'Category': chosen_cat,
+            'No.': 1,
             'Description': custom_roof_description,
             'Unit': 'LS',
             'QTY': 1.0,
-            'Rate Factor': calculated_line_item_total,
-            'Financing Options': chosen_term_option,
-            'Calculated_Price': calculated_line_item_total
+            'Rate': calculated_line_item_total,
+            'Total Amount': calculated_line_item_total,
+            'Financing Options': chosen_term_option # Hidden from table but kept for terms generator
         }]
         
-        # Display the static BOQ summary for Roof Rooms
+        # Render BOQ Table for Roof Room
         st.markdown("### 📊 Generated BOQ Summary")
-        summary_df = pd.DataFrame(st.session_state.staged_items)
-        st.dataframe(summary_df[['Product ID', 'Category', 'Description', 'Unit', 'QTY', 'Rate Factor', 'Financing Options', 'Calculated_Price']], use_container_width=True, hide_index=True)
-        aggregate_commercial_sum = calculated_line_item_total
+        summary_df = pd.DataFrame([{k: v for k, v in st.session_state.staged_items[0].items() if k != 'Financing Options'}])
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        
+        subtotal = calculated_line_item_total
+        vat = subtotal * 0.14
+        total_with_vat = subtotal + vat
 
-    # STREAMLING_CHUNK:Rendering Custom Item Data Editor Grid
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
     # -----------------------------------------------------------
     # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
     # -----------------------------------------------------------
@@ -263,63 +259,58 @@ if df_fact is not None and not df_fact.empty:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
         st.info("💡 **Tip:** Type directly into the table below. Add new rows using the blank row at the bottom, or select a row and press `Delete` to remove it.")
         
-        # Initialize default row if list is empty or coming from Roof Room
-        if not st.session_state.staged_items or st.session_state.staged_items[0].get('Category') == 'Roof Room':
+        # Reset staging layout to match simplified grid if needed
+        if not st.session_state.staged_items or 'Financing Options' in st.session_state.staged_items[0]:
             st.session_state.staged_items = [{
-                'Product ID': 'CUSTOM',
-                'Category': selected_request_type,
+                'No.': 1,
                 'Description': '',
                 'Unit': 'LS',
                 'QTY': 1.0,
-                'Rate Factor': 0.0,
-                'Financing Options': 'Cash',
-                'Calculated_Price': 0.0
+                'Rate': 0.0,
+                'Total Amount': 0.0
             }]
             
         df_to_edit = pd.DataFrame(st.session_state.staged_items)
         
-        # Get financing options for the dropdown in the grid
-        rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
-        all_financing_opts = df_rates[rate_opt_col].unique().tolist()
-        if 'Cash' not in all_financing_opts:
-            all_financing_opts.append('Cash')
-            
-        # Display the interactive grid
+        # Interactive grid with ONLY the 6 requested columns
         edited_df = st.data_editor(
             df_to_edit,
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
+            column_order=["No.", "Description", "Unit", "QTY", "Rate", "Total Amount"],
             column_config={
-                "Product ID": st.column_config.TextColumn("Product ID", default="CUSTOM"),
-                "Category": st.column_config.TextColumn("Category", default=selected_request_type),
+                "No.": st.column_config.NumberColumn("No.", disabled=True),
                 "Description": st.column_config.TextColumn("Description"),
                 "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "LM", "NO.", "LS", "Other"], default="LS"),
                 "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
-                "Rate Factor": st.column_config.NumberColumn("Rate Factor", min_value=0.0, default=0.0),
-                "Financing Options": st.column_config.SelectboxColumn("Financing Options", options=all_financing_opts),
-                "Calculated_Price": st.column_config.NumberColumn("Calculated_Price", disabled=True)
+                "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0),
+                "Total Amount": st.column_config.NumberColumn("Total Amount", disabled=True)
             }
         )
         
-        # Recalculate Totals automatically based on grid edits
+        # Recalculate Totals & Numbers dynamically
         edited_df['QTY'] = pd.to_numeric(edited_df['QTY'], errors='coerce').fillna(0.0)
-        edited_df['Rate Factor'] = pd.to_numeric(edited_df['Rate Factor'], errors='coerce').fillna(0.0)
-        edited_df['Calculated_Price'] = edited_df['QTY'] * edited_df['Rate Factor']
+        edited_df['Rate'] = pd.to_numeric(edited_df['Rate'], errors='coerce').fillna(0.0)
+        edited_df['Total Amount'] = edited_df['QTY'] * edited_df['Rate']
+        edited_df['No.'] = range(1, len(edited_df) + 1)
         
-        # Save back to state so it persists for the exporter
         st.session_state.staged_items = edited_df.to_dict('records')
         summary_df = edited_df
         
-        aggregate_commercial_sum = edited_df['Calculated_Price'].sum()
-        st.metric("Total Quotation Capital Sum (EGP)", f"{aggregate_commercial_sum:,.2f} EGP")
+        # Calculate Subtotal & VAT for custom grid
+        subtotal = edited_df['Total Amount'].sum()
+        vat = subtotal * 0.14
+        total_with_vat = subtotal + vat
+        
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     st.divider()
 
-    # STREAMLING_CHUNK:Generating Document Exports
     # --- SECTION 3: EXPORT BUTTONS (SHARED) ---
     if st.session_state.staged_items and not summary_df.empty:
-        # Ensure client name defaults properly if left entirely blank by user
         final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
         
         st.markdown("##### Finalize Document Details")
@@ -338,10 +329,10 @@ if df_fact is not None and not df_fact.empty:
                     
                     for item in st.session_state.staged_items:
                         payload["items"].append({
-                            "description": item["Description"],
-                            "unit": item["Unit"],
-                            "qty": item["QTY"],
-                            "rate": item["Rate Factor"]
+                            "description": item.get("Description", ""),
+                            "unit": item.get("Unit", "LS"),
+                            "qty": item.get("QTY", 1.0),
+                            "rate": item.get("Rate", 0.0)
                         })
                         
                     try:
@@ -372,49 +363,56 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Request Type: {selected_request_type}", ln=True)
             pdf.ln(8)
             
-            # Adjusted PDF Header Widths to accommodate Unit and QTY
+            # Simple 6-column PDF Header
             pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(20, 8, "Product ID", border=1)
-            pdf.cell(30, 8, "Category", border=1)
-            pdf.cell(75, 8, "Scope Description", border=1)
-            pdf.cell(15, 8, "Unit", border=1)
-            pdf.cell(15, 8, "QTY", border=1)
-            pdf.cell(35, 8, "Price (EGP)", border=1, ln=True)
+            pdf.cell(10, 8, "No.", border=1, align="C")
+            pdf.cell(90, 8, "Description", border=1)
+            pdf.cell(15, 8, "Unit", border=1, align="C")
+            pdf.cell(15, 8, "QTY", border=1, align="C")
+            pdf.cell(30, 8, "Rate", border=1, align="C")
+            pdf.cell(30, 8, "Total", border=1, align="C", ln=True)
             
             pdf.set_font("Helvetica", "", 9)
             for _, item_row in summary_df.iterrows():
-                pdf.cell(20, 8, str(item_row['Product ID']), border=1)
-                pdf.cell(30, 8, str(item_row['Category'])[:15], border=1) # Trim to fit width
-                pdf.cell(75, 8, str(item_row['Description'])[:42], border=1)
-                pdf.cell(15, 8, str(item_row['Unit']), border=1)
-                pdf.cell(15, 8, str(item_row['QTY']), border=1)
-                pdf.cell(35, 8, f"{item_row['Calculated_Price']:,.2f}", border=1, ln=True)
+                pdf.cell(10, 8, str(item_row.get('No.', '')), border=1, align="C")
+                pdf.cell(90, 8, str(item_row.get('Description', ''))[:45], border=1)
+                pdf.cell(15, 8, str(item_row.get('Unit', '')), border=1, align="C")
+                pdf.cell(15, 8, str(item_row.get('QTY', '')), border=1, align="C")
+                pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
+                pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
                 
             pdf.ln(6)
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 10, f"Total Summary Value: {aggregate_commercial_sum:,.2f} EGP", ln=True)
-            pdf.ln(6)
-            
             pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
-            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
+            pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
+            pdf.ln(4)
             
-            terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
-            terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
-            
-            processed_legal_terms = summary_df['Financing Options'].unique()
-            for rule_term in processed_legal_terms:
+            # Terms and Conditions (Only pulls if Financing Options exists on Roof Room)
+            if 'Financing Options' in st.session_state.staged_items[0]:
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
+                pdf.set_font("Helvetica", "", 8)
+                
+                terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
+                terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
+                
+                rule_term = st.session_state.staged_items[0].get('Financing Options')
                 matched_legal_text_blocks = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
                 if len(matched_legal_text_blocks) > 0:
                     pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
                     pdf.ln(2)
             
-            pdf_out = pdf.output(dest="S")
-            # FPDF2 vs Legacy FPDF check to prevent AttributeError
-            if isinstance(pdf_out, str):
-                compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
-            else:
-                compiled_pdf_payload = bytes(pdf_out)
+            # Safe PDF Export (Prevents AttributeError entirely)
+            try:
+                pdf_out = pdf.output(dest="S")
+                # Depending on fpdf library version, it returns a string or a bytearray
+                if isinstance(pdf_out, str):
+                    compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
+                else:
+                    compiled_pdf_payload = bytes(pdf_out)
+            except AttributeError:
+                # Absolute fallback if encode fails due to bytearray attribute error
+                compiled_pdf_payload = bytes(pdf.output(dest="S"))
             
             st.download_button(
                 label="📄 Download Quick PDF Preview",
