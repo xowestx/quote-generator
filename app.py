@@ -69,6 +69,10 @@ df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
 
+# Fallback clear if old schema exists to prevent crashes
+if st.session_state.staged_items and 'Calculated_Price' in st.session_state.staged_items[0]:
+    st.session_state.staged_items = []
+
 if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
@@ -253,7 +257,7 @@ if df_fact is not None and not df_fact.empty:
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** To ensure perfectly smooth typing without deleting data, 'Total Amount' and 'No.' are calculated automatically in the document exports and the grand totals below!")
+        st.info("💡 **Tip:** Type smoothly on the left! The read-only preview table on the right calculates your 'No.' and 'Total Amount' instantly.")
         
         # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
@@ -265,20 +269,24 @@ if df_fact is not None and not df_fact.empty:
             }])
             st.session_state.last_type = selected_request_type
         
-        # Interactive grid with ONLY the editable columns to ensure 100% stable input
-        edited_df = st.data_editor(
-            st.session_state.custom_boq_data,
-            key="custom_boq_editor",
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Description": st.column_config.TextColumn("Description"),
-                "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "LM", "NO.", "LS", "Other"], default="LS"),
-                "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
-                "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
-            }
-        )
+        # Split layout to show Editor and Preview side-by-side
+        col_editor, col_preview = st.columns([3.5, 1.5])
+        
+        with col_editor:
+            # Interactive grid with ONLY the editable columns to ensure 100% stable input
+            edited_df = st.data_editor(
+                st.session_state.custom_boq_data,
+                key="custom_boq_editor",
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Description": st.column_config.TextColumn("Description"),
+                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "LM", "NO.", "LS", "Other"], default="LS"),
+                    "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
+                    "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
+                }
+            )
         
         # Safely compute Totals downstream into a completely separate dataframe for exporting
         final_df = edited_df.copy()
@@ -286,6 +294,18 @@ if df_fact is not None and not df_fact.empty:
         final_df['Rate'] = pd.to_numeric(final_df['Rate'], errors='coerce').fillna(0.0)
         final_df['Total Amount'] = final_df['QTY'] * final_df['Rate']
         final_df.insert(0, 'No.', range(1, len(final_df) + 1))
+        
+        with col_preview:
+            # Display read-only calculation next to the editor so it doesn't cause typing lag
+            st.dataframe(
+                final_df[['No.', 'Total Amount']],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "No.": st.column_config.NumberColumn("No."),
+                    "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")
+                }
+            )
         
         # Sync to the overarching staged items system for Webhook and PDF building
         st.session_state.staged_items = final_df.to_dict('records')
