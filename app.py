@@ -287,47 +287,6 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
 
-        # --- PERGOLA RULE ENGINE HELPER ---
-        if selected_request_type == "Pergola":
-            st.info("💡 **Pergola Rule Engine:** Use this generator to apply strict math rules (like minimum 10 SQM). It will automatically calculate and add the row to your editable table below!")
-            col_g1, col_g2, col_g3 = st.columns([2, 1.5, 1])
-            with col_g1:
-                p_type = st.selectbox("1. Pergola Type", ["Musky", "Pitch pine", "Khashmonium", "Retractable"])
-            with col_g2:
-                # Dynamically change input based on Retractable selection
-                if p_type == "Retractable":
-                    p_qty = st.number_input("2. QTY (NO.)", value=1, min_value=1, step=1)
-                else:
-                    p_qty = st.number_input("2. Area (sqm)", value=10.0, min_value=0.1, step=1.0)
-            with col_g3:
-                st.write("")
-                st.write("")
-                if st.button("➕ Add to Table", type="primary", use_container_width=True):
-                    # Apply specific rules
-                    if p_type == "Retractable":
-                        desc = "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
-                        unit = "Item"
-                        qty = float(int(p_qty)) # Drops decimals (e.g. 1.5 becomes 1.0)
-                        rate = 67500.0
-                    else:
-                        rates = {"Musky": 4320.0, "Pitch pine": 7080.0, "Khashmonium": 11200.0}
-                        desc = f"Supply & Install {p_type} Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-                        
-                        if p_qty < 10:
-                            unit = "LS"
-                            qty = 1.0
-                            rate = 10.0 * rates[p_type]
-                        else:
-                            unit = "SQM"
-                            qty = float(p_qty)
-                            rate = rates[p_type]
-                    
-                    # Append strictly formatted row to standard table
-                    new_row = pd.DataFrame([{'Description': desc, 'Unit': unit, 'QTY': qty, 'Rate': rate}])
-                    st.session_state.custom_boq_data = pd.concat([st.session_state.custom_boq_data, new_row], ignore_index=True)
-                    st.rerun()
-            st.divider()
-
         # --- STANDARD TABLE RENDERER ---
         st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
