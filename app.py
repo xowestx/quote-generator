@@ -275,7 +275,8 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.last_pergola_types = ['Musky']
             st.session_state.last_type = selected_request_type
 
-        col_editor, col_preview = st.columns([3.5, 1.5])
+        # Split layout to ensure the exact visual order: No, Type, Description, Area, Unit, Rate, Total
+        col_no, col_editor, col_preview = st.columns([0.4, 4.0, 2.0])
         
         with col_editor:
             edited_pergola = st.data_editor(
@@ -283,10 +284,11 @@ if df_fact is not None and not df_fact.empty:
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
+                column_order=["Type", "Description", "Area / QTY"],
                 column_config={
                     "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], required=True),
-                    "Area / QTY": st.column_config.NumberColumn("Area / QTY", min_value=0.0),
-                    "Description": st.column_config.TextColumn("Description")
+                    "Description": st.column_config.TextColumn("Description"),
+                    "Area / QTY": st.column_config.NumberColumn("Area", min_value=0.0)
                 }
             )
 
@@ -356,13 +358,22 @@ if df_fact is not None and not df_fact.empty:
                     final_df.at[i, 'Unit'] = "SQM"
                     final_df.at[i, 'Total Amount'] = raw_qty * rate
 
-        with col_preview:
+        with col_no:
             st.dataframe(
-                final_df[['No.', 'Unit', 'Rate', 'Total Amount']],
+                final_df[['No.']],
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "No.": st.column_config.NumberColumn("No."),
+                    "No.": st.column_config.NumberColumn("No.")
+                }
+            )
+
+        with col_preview:
+            st.dataframe(
+                final_df[['Unit', 'Rate', 'Total Amount']],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
                     "Unit": st.column_config.TextColumn("Unit"),
                     "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
                     "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
