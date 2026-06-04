@@ -91,7 +91,6 @@ if df_fact is not None and not df_fact.empty:
         
         # Sort the list alphabetically for easier navigation
         valid_units = sorted(list(set(valid_units)), key=lambda x: str(x))
-        
         selected_unit = st.selectbox("Select Unit ID", valid_units)
         
         # Fetch unit metadata from FACT tab safely
@@ -493,6 +492,21 @@ if df_fact is not None and not df_fact.empty:
         st.markdown("##### Finalize Document Details")
         col_export1, col_export2 = st.columns(2)
         
+        # 🚀 CUSTOM CONDITIONAL REQUEST TYPE CONVERSION Logic for terms lookups:
+        webhook_request_type = selected_request_type
+        if selected_request_type == "Roof Room" and 'Financing Options' in st.session_state.staged_items[0]:
+            chosen_term = st.session_state.staged_items[0].get('Financing Options', '')
+            term_clean = str(chosen_term).lower()
+            if "6 months" in term_clean:
+                webhook_request_type = "Roof Room - 6 months"
+            elif "2 years" in term_clean:
+                webhook_request_type = "Roof Room - 2 Years"
+            elif "3 years" in term_clean:
+                webhook_request_type = "Roof Room - 3 Years"
+            else:
+                suffix = str(chosen_term).replace("installment", "").replace("Installment", "").strip()
+                webhook_request_type = f"Roof Room - {suffix}"
+        
         with col_export1:
             if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
                 with st.spinner("Transmitting to Google Workspace..."):
@@ -500,7 +514,7 @@ if df_fact is not None and not df_fact.empty:
                         "unitId": selected_unit,
                         "clientName": final_client_name,
                         "zone": str(zone_name),
-                        "requestType": selected_request_type, 
+                        "requestType": webhook_request_type, 
                         "items": []
                     }
                     
@@ -537,7 +551,7 @@ if df_fact is not None and not df_fact.empty:
             pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
             pdf.cell(0, 10, f"Client Reference Name: {final_client_name}", ln=True)
             pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
-            pdf.cell(0, 10, f"Request Type: {selected_request_type}", ln=True)
+            pdf.cell(0, 10, f"Request Type: {webhook_request_type}", ln=True)
             pdf.ln(8)
             
             # Simple 6-column PDF Header
@@ -567,31 +581,37 @@ if df_fact is not None and not df_fact.empty:
                 
             pdf.ln(4)
             
-            # Terms and Conditions (Only pulls if Financing Options exists on Roof Room)
-            if 'Financing Options' in st.session_state.staged_items[0]:
-                pdf.set_font("Helvetica", "B", 11)
-                pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
-                pdf.set_font("Helvetica", "", 8)
-                
+            # Terms and Conditions Lookup - matches dynamic category name
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
+            pdf.set_font("Helvetica", "", 8)
+            
+            terms_cat_col = df_terms.columns[0]
+            terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
+            
+            # 1. Match primarily by our calculated dynamic typical category lookup
+            matched_legal_text_blocks = df_terms[df_terms[terms_cat_col].str.upper() == webhook_request_type.upper()][terms_text_col].values
+            if len(matched_legal_text_blocks) > 0:
+                pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
+                pdf.ln(2)
+            else:
+                # 2. Fallback secondary match using Options column for Roof Room
                 terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
-                terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
-                
-                rule_term = st.session_state.staged_items[0].get('Financing Options')
-                matched_legal_text_blocks = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
-                if len(matched_legal_text_blocks) > 0:
-                    pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
-                    pdf.ln(2)
+                if 'Financing Options' in st.session_state.staged_items[0]:
+                    rule_term = st.session_state.staged_items[0].get('Financing Options')
+                    matched_legal_text_blocks = df_terms[df_terms[terms_opt_col].str.upper() == str(rule_term).upper()][terms_text_col].values
+                    if len(matched_legal_text_blocks) > 0:
+                        pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
+                        pdf.ln(2)
             
             # Safe PDF Export (Prevents AttributeError entirely)
             try:
                 pdf_out = pdf.output(dest="S")
-                # Depending on fpdf library version, it returns a string or a bytearray
                 if isinstance(pdf_out, str):
                     compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
                 else:
                     compiled_pdf_payload = bytes(pdf_out)
             except AttributeError:
-                # Absolute fallback if encode fails due to bytearray attribute error
                 compiled_pdf_payload = bytes(pdf.output(dest="S"))
             
             st.download_button(
