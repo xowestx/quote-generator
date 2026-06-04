@@ -5,13 +5,14 @@ from fpdf import FPDF
 import re
 import requests
 import json
+import streamlit.components.v1 as components
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 
-# Hardcoded Webhook URL
+# Hardcoded Deployed Webhook URL
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzt5KDoxG9DbYPXzFe7HiYJ6WgYdpsYE65p7Zuwnq6PycZdvbtGyCe_8G1OwwM3cxP/exec"
 
 @st.cache_data(ttl=60)
@@ -69,9 +70,11 @@ df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
 
-# Fallback clear if old schema exists to prevent crashes
-if st.session_state.staged_items and 'Calculated_Price' in st.session_state.staged_items[0]:
-    st.session_state.staged_items = []
+# Persistent storage for generated documents to keep links active during reruns
+if 'generated_doc_url' not in st.session_state:
+    st.session_state.generated_doc_url = None
+if 'generated_pdf_url' not in st.session_state:
+    st.session_state.generated_pdf_url = None
 
 if df_fact is not None and not df_fact.empty:
     
@@ -189,7 +192,6 @@ if df_fact is not None and not df_fact.empty:
         if filtered_catalog.empty:
             filtered_catalog = df_products
 
-        # UI Layout for Roof Room
         col_vr, col_fin = st.columns([2, 1])
         
         with col_vr:
@@ -235,7 +237,7 @@ if df_fact is not None and not df_fact.empty:
             'QTY': 1.0,
             'Rate': calculated_line_item_total,
             'Total Amount': calculated_line_item_total,
-            'Financing Options': chosen_term_option # Hidden from table but kept for terms generator
+            'Financing Options': chosen_term_option
         }]
         
         # Render BOQ Table for Roof Room
@@ -252,147 +254,7 @@ if df_fact is not None and not df_fact.empty:
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     # -----------------------------------------------------------
-    # BRANCH B: SMART PERGOLA LOGIC
-    # -----------------------------------------------------------
-    elif selected_request_type == "Pergola":
-        st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Select a 'Type' and the Description will auto-fill. You can then edit the description freely! The preview on the right calculates the rules automatically.")
-        
-        # Helper to get the default legal description based on type
-        def get_pergola_desc(ptype):
-            if ptype == "Pitch pine": return "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-            if ptype == "Khashmonium": return "Supply & Install Khashmonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-            if ptype == "Retractable": return "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
-            return "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-
-        if 'pergola_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
-            st.session_state.pergola_data = pd.DataFrame([{
-                'Type': 'Musky',
-                'Area / QTY': 10.0,
-                'Description': get_pergola_desc('Musky')
-            }])
-            st.session_state.last_pergola_types = ['Musky']
-            st.session_state.last_type = selected_request_type
-
-        # Split layout to ensure the exact visual order: No, Type, Description, Area, Unit, Rate, Total
-        col_no, col_editor, col_preview = st.columns([0.4, 4.0, 2.0])
-        
-        with col_editor:
-            edited_pergola = st.data_editor(
-                st.session_state.pergola_data,
-                num_rows="dynamic",
-                use_container_width=True,
-                hide_index=True,
-                column_order=["Type", "Description", "Area / QTY"],
-                column_config={
-                    "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], required=True),
-                    "Description": st.column_config.TextColumn("Description"),
-                    "Area / QTY": st.column_config.NumberColumn("Area", min_value=0.0)
-                }
-            )
-
-        # Self-Healing & Auto-Fill Logic for Data Editor
-        needs_rerun = False
-        current_types = edited_pergola['Type'].tolist()
-        last_types = st.session_state.get('last_pergola_types', [])
-        
-        for i in range(len(edited_pergola)):
-            ptype = edited_pergola.at[i, 'Type']
-            
-            # Handle new blank rows added by user at the bottom of the table
-            if pd.isna(ptype) or not ptype:
-                edited_pergola.at[i, 'Type'] = 'Musky'
-                edited_pergola.at[i, 'Area / QTY'] = 10.0
-                edited_pergola.at[i, 'Description'] = get_pergola_desc('Musky')
-                needs_rerun = True
-                continue
-
-            # Auto-update the description if they select a new Type from the dropdown
-            if i < len(last_types):
-                if current_types[i] != last_types[i]:
-                    edited_pergola.at[i, 'Description'] = get_pergola_desc(current_types[i])
-                    edited_pergola.at[i, 'Area / QTY'] = 1.0 if current_types[i] == "Retractable" else 10.0
-                    needs_rerun = True
-            elif pd.isna(edited_pergola.at[i, 'Description']) or str(edited_pergola.at[i, 'Description']).strip() == "":
-                edited_pergola.at[i, 'Description'] = get_pergola_desc(ptype)
-                needs_rerun = True
-
-        st.session_state.last_pergola_types = edited_pergola['Type'].tolist()
-        
-        if needs_rerun:
-            st.session_state.pergola_data = edited_pergola
-            st.rerun()
-
-        # Math Processing & Strict Rules
-        final_df = pd.DataFrame()
-        final_df['Description'] = edited_pergola['Description']
-        final_df['No.'] = range(1, len(edited_pergola) + 1)
-        final_df['Unit'] = 'SQM'
-        final_df['QTY'] = 0.0
-        final_df['Rate'] = 0.0
-        final_df['Total Amount'] = 0.0
-
-        for i in range(len(edited_pergola)):
-            ptype = edited_pergola.at[i, 'Type']
-            raw_qty = float(edited_pergola.at[i, 'Area / QTY'])
-            
-            if ptype == "Musky": rate = 4320.0
-            elif ptype == "Pitch pine": rate = 7080.0
-            elif ptype == "Khashmonium": rate = 11200.0
-            elif ptype == "Retractable": rate = 67500.0
-            else: rate = 0.0
-            
-            final_df.at[i, 'Rate'] = rate
-            
-            if ptype == "Retractable":
-                final_df.at[i, 'Unit'] = "Item"
-                final_df.at[i, 'QTY'] = float(int(raw_qty)) # Force natural number, drop decimals
-                final_df.at[i, 'Total Amount'] = final_df.at[i, 'QTY'] * rate
-            else:
-                final_df.at[i, 'QTY'] = raw_qty
-                if raw_qty < 10.0:
-                    final_df.at[i, 'Unit'] = "LS"
-                    final_df.at[i, 'Total Amount'] = 10.0 * rate # Applies the minimum area calculation
-                else:
-                    final_df.at[i, 'Unit'] = "SQM"
-                    final_df.at[i, 'Total Amount'] = raw_qty * rate
-
-        with col_no:
-            st.dataframe(
-                final_df[['No.']],
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "No.": st.column_config.NumberColumn("No.")
-                }
-            )
-
-        with col_preview:
-            st.dataframe(
-                final_df[['Unit', 'Rate', 'Total Amount']],
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Unit": st.column_config.TextColumn("Unit"),
-                    "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
-                    "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
-                }
-            )
-
-        st.session_state.staged_items = final_df.to_dict('records')
-        summary_df = final_df
-        
-        # Calculate Subtotal & VAT
-        subtotal = final_df['Total Amount'].sum()
-        vat = subtotal * 0.14
-        total_with_vat = subtotal + vat
-        
-        col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
-
-    # -----------------------------------------------------------
-    # BRANCH C: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
+    # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
@@ -509,7 +371,7 @@ if df_fact is not None and not df_fact.empty:
         
         with col_export1:
             if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
-                with st.spinner("Transmitting to Google Workspace..."):
+                with st.spinner("Transmitting data & building shareable cloud documents..."):
                     payload = {
                         "unitId": selected_unit,
                         "clientName": final_client_name,
@@ -533,8 +395,10 @@ if df_fact is not None and not df_fact.empty:
                         if response.status_code == 200:
                             response_data = response.json()
                             if response_data.get("status") == "success":
-                                st.success("✅ Quotation Generated Successfully!")
-                                st.markdown(f"**[📄 Click Here to Open the Generated Google Doc]({response_data.get('docUrl')})**")
+                                # Save URLs to session state so they persist and render in the UI
+                                st.session_state.generated_doc_url = response_data.get("docUrl")
+                                st.session_state.generated_pdf_url = response_data.get("pdfUrl")
+                                st.success("✅ Quotation and PDF Generated Successfully!")
                             else:
                                 st.error(f"Apps Script Error: {response_data.get('message')}")
                         else:
@@ -621,5 +485,86 @@ if df_fact is not None and not df_fact.empty:
                 mime="application/pdf",
                 use_container_width=True
             )
+
+        # ==========================================
+        # 4. MOBILE SHARE SHEET & CLOUD HUB
+        # ==========================================
+        if st.session_state.generated_doc_url and st.session_state.generated_pdf_url:
+            st.markdown("---")
+            st.markdown("### 📱 Mobile Share Sheet & Document Hub")
+            
+            # Build beautifully styled cards using container borders
+            share_card = st.container(border=True)
+            with share_card:
+                st.markdown("##### 🎉 Document sets have been generated successfully!")
+                
+                sh_c1, sh_c2 = st.columns(2)
+                with sh_c1:
+                    st.link_button("📄 Open Google Doc Link", st.session_state.generated_doc_url, use_container_width=True)
+                with sh_c2:
+                    st.link_button("📕 Open Shareable PDF Copy", st.session_state.generated_pdf_url, use_container_width=True)
+                
+                st.markdown("---")
+                st.markdown("###### 📲 Quick Mobile Native Sharing")
+                
+                # Native Browser Web Share API HTML embed
+                native_share_html = f"""
+                <div style="display: flex; justify-content: center; align-items: center; width: 100%;">
+                    <button id="nativeShareBtn" style="
+                        width: 100%;
+                        background-color: #25D366;
+                        color: white;
+                        border: none;
+                        padding: 12px 20px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        gap: 8px;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='#20ba5a'" onmouseout="this.style.backgroundColor='#25D366'">
+                        💬 Native Share PDF (WhatsApp, Mail, AirDrop)
+                    </button>
+                </div>
+                <script>
+                document.getElementById('nativeShareBtn').addEventListener('click', async () => {{
+                    if (navigator.share) {{
+                        try {{
+                            await navigator.share({{
+                                title: 'O West Extra Works Proposal',
+                                text: 'Dear Client, please find the shareable PDF of your O West EXTRA WORKS proposal here.',
+                                url: '{st.session_state.generated_pdf_url}'
+                            }});
+                            console.log('Share prompt opened successfully.');
+                        }} catch (err) {{
+                            console.log('Error opening native share prompt:', err);
+                            // Fallback to direct window redirect if cancelled
+                            window.open('{st.session_state.generated_pdf_url}', '_blank');
+                        }}
+                    } else {{
+                        // Fallback: Open in Google Drive preview on desktops
+                        window.open('{st.session_state.generated_pdf_url}', '_blank');
+                    }}
+                }});
+                </script>
+                """
+                components.html(native_share_html, height=60)
+                
+                # Standard fallback options
+                st.markdown("<p style='text-align: center; font-size: 11px; color: gray;'>Mobile direct triggers: if Native Share is unsupported, it launches direct browser previews.</p>", unsafe_allow_html=True)
+                
+                # Direct formatted mail trigger
+                encoded_subject = requests.utils.quote(f"O West extra works proposal for unit {selected_unit}")
+                encoded_body = requests.utils.quote(f"Dear Client,\n\nPlease find the PDF copy of your requested extra works contract below:\n\n{st.session_state.generated_pdf_url}\n\nBest regards,\nOrascom Development")
+                mailto_url = f"mailto:?subject={encoded_subject}&body={encoded_body}"
+                
+                m1, m2 = st.columns(2)
+                with m1:
+                    st.link_button("✉️ Send via Direct Mail", mailto_url, use_container_width=True)
+                with m2:
+                    st.text_input("🔗 Copy Shareable Link Directly", value=st.session_state.generated_pdf_url, disabled=True)
 else:
     st.info("Awaiting structural backend database connection strings...")
