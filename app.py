@@ -253,28 +253,150 @@ if df_fact is not None and not df_fact.empty:
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     # -----------------------------------------------------------
-    # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
+    # BRANCH B: SMART PERGOLA LOGIC
+    # -----------------------------------------------------------
+    elif selected_request_type == "Pergola":
+        st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
+        st.info("💡 **Tip:** Select a 'Type' and the Description will auto-fill. You can then edit the description freely! The preview on the right calculates the rules automatically.")
+        
+        # Helper to get the default legal description based on type
+        def get_pergola_desc(ptype):
+            if ptype == "Pitch pine": return "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+            if ptype == "Khashmonium": return "Supply & Install Khashmonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+            if ptype == "Retractable": return "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
+            return "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+
+        if 'pergola_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
+            st.session_state.pergola_data = pd.DataFrame([{
+                'Type': 'Musky',
+                'Area / QTY': 10.0,
+                'Description': get_pergola_desc('Musky')
+            }])
+            st.session_state.last_pergola_types = ['Musky']
+            st.session_state.last_type = selected_request_type
+
+        col_editor, col_preview = st.columns([3.5, 1.5])
+        
+        with col_editor:
+            edited_pergola = st.data_editor(
+                st.session_state.pergola_data,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], required=True),
+                    "Area / QTY": st.column_config.NumberColumn("Area / QTY", min_value=0.0),
+                    "Description": st.column_config.TextColumn("Description")
+                }
+            )
+
+        # Self-Healing & Auto-Fill Logic for Data Editor
+        needs_rerun = False
+        current_types = edited_pergola['Type'].tolist()
+        last_types = st.session_state.get('last_pergola_types', [])
+        
+        for i in range(len(edited_pergola)):
+            ptype = edited_pergola.at[i, 'Type']
+            
+            # Handle new blank rows added by user at the bottom of the table
+            if pd.isna(ptype) or not ptype:
+                edited_pergola.at[i, 'Type'] = 'Musky'
+                edited_pergola.at[i, 'Area / QTY'] = 10.0
+                edited_pergola.at[i, 'Description'] = get_pergola_desc('Musky')
+                needs_rerun = True
+                continue
+
+            # Auto-update the description if they select a new Type from the dropdown
+            if i < len(last_types):
+                if current_types[i] != last_types[i]:
+                    edited_pergola.at[i, 'Description'] = get_pergola_desc(current_types[i])
+                    edited_pergola.at[i, 'Area / QTY'] = 1.0 if current_types[i] == "Retractable" else 10.0
+                    needs_rerun = True
+            elif pd.isna(edited_pergola.at[i, 'Description']) or str(edited_pergola.at[i, 'Description']).strip() == "":
+                edited_pergola.at[i, 'Description'] = get_pergola_desc(ptype)
+                needs_rerun = True
+
+        st.session_state.last_pergola_types = edited_pergola['Type'].tolist()
+        
+        if needs_rerun:
+            st.session_state.pergola_data = edited_pergola
+            st.rerun()
+
+        # Math Processing & Strict Rules
+        final_df = pd.DataFrame()
+        final_df['Description'] = edited_pergola['Description']
+        final_df['No.'] = range(1, len(edited_pergola) + 1)
+        final_df['Unit'] = 'SQM'
+        final_df['QTY'] = 0.0
+        final_df['Rate'] = 0.0
+        final_df['Total Amount'] = 0.0
+
+        for i in range(len(edited_pergola)):
+            ptype = edited_pergola.at[i, 'Type']
+            raw_qty = float(edited_pergola.at[i, 'Area / QTY'])
+            
+            if ptype == "Musky": rate = 4320.0
+            elif ptype == "Pitch pine": rate = 7080.0
+            elif ptype == "Khashmonium": rate = 11200.0
+            elif ptype == "Retractable": rate = 67500.0
+            else: rate = 0.0
+            
+            final_df.at[i, 'Rate'] = rate
+            
+            if ptype == "Retractable":
+                final_df.at[i, 'Unit'] = "Item"
+                final_df.at[i, 'QTY'] = float(int(raw_qty)) # Force natural number, drop decimals
+                final_df.at[i, 'Total Amount'] = final_df.at[i, 'QTY'] * rate
+            else:
+                final_df.at[i, 'QTY'] = raw_qty
+                if raw_qty < 10.0:
+                    final_df.at[i, 'Unit'] = "LS"
+                    final_df.at[i, 'Total Amount'] = 10.0 * rate # Applies the minimum area calculation
+                else:
+                    final_df.at[i, 'Unit'] = "SQM"
+                    final_df.at[i, 'Total Amount'] = raw_qty * rate
+
+        with col_preview:
+            st.dataframe(
+                final_df[['No.', 'Unit', 'Rate', 'Total Amount']],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "No.": st.column_config.NumberColumn("No."),
+                    "Unit": st.column_config.TextColumn("Unit"),
+                    "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
+                    "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
+                }
+            )
+
+        st.session_state.staged_items = final_df.to_dict('records')
+        summary_df = final_df
+        
+        # Calculate Subtotal & VAT
+        subtotal = final_df['Total Amount'].sum()
+        vat = subtotal * 0.14
+        total_with_vat = subtotal + vat
+        
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
+    # -----------------------------------------------------------
+    # BRANCH C: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
+        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
         # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
-            # --- SPECIAL HANDLING FOR INITIAL ROWS ---
+            # --- SPECIAL HANDLING FOR LAND EXTENSION ---
             if selected_request_type == "Land Extension":
                 initial_data = [{
                     'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
                     'Unit': 'M2',
-                    'QTY': 0.0,
-                    'Rate': 55000.0
-                }]
-            elif selected_request_type == "Pergola":
-                # Pre-fill the first row with a standard 10 SQM Musky to save time
-                initial_data = [{
-                    'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.',
-                    'Unit': 'SQM',
-                    'QTY': 10.0,
-                    'Rate': 4320.0
+                    'QTY': 0.0,  # User types the actual area here
+                    'Rate': 55000.0  # Fixed standard rate
                 }]
             else:
                 initial_data = [{
@@ -286,9 +408,6 @@ if df_fact is not None and not df_fact.empty:
             
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
-
-        # --- STANDARD TABLE RENDERER ---
-        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
         # Split layout to show No. Preview, Editor, and Total Preview side-by-side
         col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
@@ -303,7 +422,7 @@ if df_fact is not None and not df_fact.empty:
                 hide_index=True,
                 column_config={
                     "Description": st.column_config.TextColumn("Description"),
-                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Item", "Other"], default="LS"),
+                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"),
                     "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
                     "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
                 }
