@@ -253,132 +253,28 @@ if df_fact is not None and not df_fact.empty:
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     # -----------------------------------------------------------
-    # BRANCH B: PERGOLA (SPECIAL PRICING RULES)
-    # -----------------------------------------------------------
-    elif selected_request_type == "Pergola":
-        st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Leave 'Description Override' blank to automatically generate the standard legal text! Or type your own text to override it.")
-        
-        if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
-            st.session_state.custom_boq_data = pd.DataFrame([{
-                'Pergola Type': 'Musky',
-                'Area (sqm)': 10.0,
-                'Description Override': ''
-            }])
-            st.session_state.last_type = selected_request_type
-        
-        # 3-Column Layout
-        col_no, col_editor, col_preview = st.columns([0.4, 3.2, 3.4])
-        
-        with col_editor:
-            # Editor asks for Type, Area, and optional Description
-            edited_df = st.data_editor(
-                st.session_state.custom_boq_data,
-                key="pergola_editor",
-                num_rows="dynamic",
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Pergola Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], default="Musky", required=True),
-                    "Area (sqm)": st.column_config.NumberColumn("Area", min_value=0.0, default=10.0, required=True),
-                    "Description Override": st.column_config.TextColumn("Description Override (Optional)")
-                }
-            )
-            
-        # Apply the complex math and logic rules behind the scenes
-        final_rows = []
-        for idx, row in edited_df.iterrows():
-            ptype = row.get('Pergola Type', 'Musky')
-            parea = pd.to_numeric(row.get('Area (sqm)', 0.0), errors='coerce')
-            if pd.isna(parea): parea = 0.0
-            
-            # Safely grab custom override, checking for NaNs
-            custom_desc = str(row.get('Description Override', '')).strip()
-            if custom_desc.lower() == 'nan': custom_desc = ''
-            
-            if ptype == "Retractable":
-                std_desc = "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
-                unit = "LS"
-                qty = 1.0
-                rate = 67500.0
-            else:
-                if ptype == "Pitch pine":
-                    base_rate = 7080.0
-                    std_desc = "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-                elif ptype == "Khashmonium":
-                    base_rate = 11200.0
-                    std_desc = "Supply & Install Khashmonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-                else: # Musky
-                    base_rate = 4320.0
-                    std_desc = "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
-                
-                # Pricing Rule: Minimum 10 SQM -> Convert to LS
-                if parea < 10:
-                    unit = "LS"
-                    qty = 1.0
-                    rate = 10.0 * base_rate
-                else:
-                    unit = "SQM"
-                    qty = parea
-                    rate = base_rate
-                    
-            # Use user's description if they typed one, otherwise fallback to the standard legal text
-            final_desc = custom_desc if custom_desc else std_desc
-                    
-            final_rows.append({
-                'Description': final_desc,
-                'Unit': unit,
-                'QTY': qty,
-                'Rate': rate,
-                'Total Amount': qty * rate
-            })
-            
-        final_df = pd.DataFrame(final_rows)
-        final_df.insert(0, 'No.', range(1, len(final_df) + 1))
-        
-        with col_no:
-            st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
-            
-        with col_preview:
-            # Preview shows exactly what will be printed
-            st.dataframe(
-                final_df[['Description', 'Total Amount']], 
-                hide_index=True, 
-                use_container_width=True,
-                column_config={
-                    "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP"),
-                    "Description": st.column_config.TextColumn("Final Generated Text")
-                }
-            )
-            
-        # Sync to overarching staged items for Export
-        st.session_state.staged_items = final_df.to_dict('records')
-        summary_df = final_df
-        
-        subtotal = final_df['Total Amount'].sum()
-        vat = subtotal * 0.14
-        total_with_vat = subtotal + vat
-        
-        col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
-
-    # -----------------------------------------------------------
-    # BRANCH C: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
+    # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
         # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
-            # --- SPECIAL HANDLING FOR LAND EXTENSION ---
+            # --- SPECIAL HANDLING FOR INITIAL ROWS ---
             if selected_request_type == "Land Extension":
                 initial_data = [{
                     'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
                     'Unit': 'M2',
-                    'QTY': 0.0,  # User types the actual area here
-                    'Rate': 55000.0  # Fixed standard rate
+                    'QTY': 0.0,
+                    'Rate': 55000.0
+                }]
+            elif selected_request_type == "Pergola":
+                # Pre-fill the first row with a standard 10 SQM Musky to save time
+                initial_data = [{
+                    'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.',
+                    'Unit': 'SQM',
+                    'QTY': 10.0,
+                    'Rate': 4320.0
                 }]
             else:
                 initial_data = [{
@@ -390,6 +286,50 @@ if df_fact is not None and not df_fact.empty:
             
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
+
+        # --- PERGOLA RULE ENGINE HELPER ---
+        if selected_request_type == "Pergola":
+            st.info("💡 **Pergola Rule Engine:** Use this generator to apply strict math rules (like minimum 10 SQM). It will automatically calculate and add the row to your editable table below!")
+            col_g1, col_g2, col_g3 = st.columns([2, 1.5, 1])
+            with col_g1:
+                p_type = st.selectbox("1. Pergola Type", ["Musky", "Pitch pine", "Khashmonium", "Retractable"])
+            with col_g2:
+                # Dynamically change input based on Retractable selection
+                if p_type == "Retractable":
+                    p_qty = st.number_input("2. QTY (NO.)", value=1, min_value=1, step=1)
+                else:
+                    p_qty = st.number_input("2. Area (sqm)", value=10.0, min_value=0.1, step=1.0)
+            with col_g3:
+                st.write("")
+                st.write("")
+                if st.button("➕ Add to Table", type="primary", use_container_width=True):
+                    # Apply specific rules
+                    if p_type == "Retractable":
+                        desc = "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
+                        unit = "Item"
+                        qty = float(int(p_qty)) # Drops decimals (e.g. 1.5 becomes 1.0)
+                        rate = 67500.0
+                    else:
+                        rates = {"Musky": 4320.0, "Pitch pine": 7080.0, "Khashmonium": 11200.0}
+                        desc = f"Supply & Install {p_type} Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+                        
+                        if p_qty < 10:
+                            unit = "LS"
+                            qty = 1.0
+                            rate = 10.0 * rates[p_type]
+                        else:
+                            unit = "SQM"
+                            qty = float(p_qty)
+                            rate = rates[p_type]
+                    
+                    # Append strictly formatted row to standard table
+                    new_row = pd.DataFrame([{'Description': desc, 'Unit': unit, 'QTY': qty, 'Rate': rate}])
+                    st.session_state.custom_boq_data = pd.concat([st.session_state.custom_boq_data, new_row], ignore_index=True)
+                    st.rerun()
+            st.divider()
+
+        # --- STANDARD TABLE RENDERER ---
+        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.' and 'Total Amount' instantly.")
         
         # Split layout to show No. Preview, Editor, and Total Preview side-by-side
         col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
@@ -404,7 +344,7 @@ if df_fact is not None and not df_fact.empty:
                 hide_index=True,
                 column_config={
                     "Description": st.column_config.TextColumn("Description"),
-                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"),
+                    "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Item", "Other"], default="LS"),
                     "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
                     "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
                 }
