@@ -257,21 +257,21 @@ if df_fact is not None and not df_fact.empty:
     # -----------------------------------------------------------
     elif selected_request_type == "Pergola":
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Select the Pergola Type and Area on the left. The strict pricing rules and legal descriptions will auto-generate perfectly on the right!")
+        st.info("💡 **Tip:** Leave 'Description Override' blank to automatically generate the standard legal text! Or type your own text to override it.")
         
-        # Isolate the editable table data perfectly to prevent refresh loop deletion
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
             st.session_state.custom_boq_data = pd.DataFrame([{
                 'Pergola Type': 'Musky',
-                'Area (sqm)': 10.0
+                'Area (sqm)': 10.0,
+                'Description Override': ''
             }])
             st.session_state.last_type = selected_request_type
         
-        # 3-Column Layout: No. on left, Editable Inputs in center, Auto-Generated Preview on right
-        col_no, col_editor, col_preview = st.columns([0.4, 2.0, 4.6])
+        # 3-Column Layout
+        col_no, col_editor, col_preview = st.columns([0.4, 3.2, 3.4])
         
         with col_editor:
-            # Editor only asks for Type and Area
+            # Editor asks for Type, Area, and optional Description
             edited_df = st.data_editor(
                 st.session_state.custom_boq_data,
                 key="pergola_editor",
@@ -279,8 +279,9 @@ if df_fact is not None and not df_fact.empty:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Pergola Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], default="Musky"),
-                    "Area (sqm)": st.column_config.NumberColumn("Area", min_value=0.0, default=10.0)
+                    "Pergola Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch pine", "Khashmonium", "Retractable"], default="Musky", required=True),
+                    "Area (sqm)": st.column_config.NumberColumn("Area", min_value=0.0, default=10.0, required=True),
+                    "Description Override": st.column_config.TextColumn("Description Override (Optional)")
                 }
             )
             
@@ -291,23 +292,27 @@ if df_fact is not None and not df_fact.empty:
             parea = pd.to_numeric(row.get('Area (sqm)', 0.0), errors='coerce')
             if pd.isna(parea): parea = 0.0
             
+            # Safely grab custom override, checking for NaNs
+            custom_desc = str(row.get('Description Override', '')).strip()
+            if custom_desc.lower() == 'nan': custom_desc = ''
+            
             if ptype == "Retractable":
-                desc = "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
+                std_desc = "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
                 unit = "LS"
                 qty = 1.0
                 rate = 67500.0
             else:
                 if ptype == "Pitch pine":
                     base_rate = 7080.0
-                    desc = "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+                    std_desc = "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
                 elif ptype == "Khashmonium":
                     base_rate = 11200.0
-                    desc = "Supply & Install Khashmonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+                    std_desc = "Supply & Install Khashmonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
                 else: # Musky
                     base_rate = 4320.0
-                    desc = "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+                    std_desc = "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
                 
-                # Rule: Minimum 10 SQM -> Convert to LS
+                # Pricing Rule: Minimum 10 SQM -> Convert to LS
                 if parea < 10:
                     unit = "LS"
                     qty = 1.0
@@ -317,8 +322,11 @@ if df_fact is not None and not df_fact.empty:
                     qty = parea
                     rate = base_rate
                     
+            # Use user's description if they typed one, otherwise fallback to the standard legal text
+            final_desc = custom_desc if custom_desc else std_desc
+                    
             final_rows.append({
-                'Description': desc,
+                'Description': final_desc,
                 'Unit': unit,
                 'QTY': qty,
                 'Rate': rate,
@@ -332,13 +340,14 @@ if df_fact is not None and not df_fact.empty:
             st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
             
         with col_preview:
+            # Preview shows exactly what will be printed
             st.dataframe(
-                final_df[['Description', 'Unit', 'QTY', 'Rate', 'Total Amount']], 
+                final_df[['Description', 'Total Amount']], 
                 hide_index=True, 
                 use_container_width=True,
                 column_config={
                     "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP"),
-                    "Rate": st.column_config.NumberColumn("Rate", format="%.2f")
+                    "Description": st.column_config.TextColumn("Final Generated Text")
                 }
             )
             
