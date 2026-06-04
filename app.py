@@ -279,7 +279,8 @@ if df_fact is not None and not df_fact.empty:
                 initial_data = [{
                     'Type': 'Musky',
                     'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.',
-                    'Area / QTY (NO.)': 10.0
+                    'Area / QTY (NO.)': 10.0,
+                    'prev_Type': 'Musky'
                 }]
             else:
                 initial_data = [{
@@ -296,14 +297,19 @@ if df_fact is not None and not df_fact.empty:
         if selected_request_type == "Pergola":
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
             
+            # Make sure prev_Type column exists in the dataframe
+            if 'prev_Type' not in st.session_state.custom_boq_data.columns:
+                st.session_state.custom_boq_data['prev_Type'] = st.session_state.custom_boq_data['Type']
+                
             with col_editor:
-                # Pergola pre-filling engine: Detects structural edits to dynamically write descriptions on type change
+                # Interactive grid with ONLY the editable columns to ensure 100% stable input
                 edited_df = st.data_editor(
                     st.session_state.custom_boq_data,
                     key="custom_boq_editor",
                     num_rows="dynamic",
                     use_container_width=True,
                     hide_index=True,
+                    column_order=["Type", "Description", "Area / QTY (NO.)"], # Hide prev_Type from UI
                     column_config={
                         "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch Pine", "Khashamonium", "Retractable"], default="Musky"),
                         "Description": st.column_config.TextColumn("Description"),
@@ -320,14 +326,30 @@ if df_fact is not None and not df_fact.empty:
             }
             
             final_rows = []
+            has_changes = False
+            
+            # Ensure edited_df has the prev_Type column to avoid KeyErrors
+            if 'prev_Type' not in edited_df.columns:
+                edited_df['prev_Type'] = edited_df['Type'].fillna('Musky')
+
             for idx, row in edited_df.iterrows():
                 p_type = row.get("Type", "Musky")
+                prev_type = row.get("prev_Type", "")
                 current_desc = str(row.get("Description", "")).strip()
                 
-                # Check if we should auto-fill the description based on the type chosen
-                is_default_or_empty = any(current_desc == val["desc"] for val in PERGOLA_RULES.values()) or current_desc == "" or current_desc == "nan"
-                resolved_desc = PERGOLA_RULES[p_type]["desc"] if is_default_or_empty else current_desc
-                edited_df.at[idx, "Description"] = resolved_desc
+                # Check if the row is brand new or if the Type has been changed
+                if pd.isna(prev_type) or p_type != prev_type:
+                    resolved_desc = PERGOLA_RULES[p_type]["desc"]
+                    edited_df.at[idx, "Description"] = resolved_desc
+                    edited_df.at[idx, "prev_Type"] = p_type
+                    # Also set default area based on Type
+                    if p_type == "Retractable":
+                        edited_df.at[idx, "Area / QTY (NO.)"] = 1.0
+                    else:
+                        edited_df.at[idx, "Area / QTY (NO.)"] = 10.0
+                    has_changes = True
+                else:
+                    resolved_desc = current_desc
                 
                 qty_input = float(row.get("Area / QTY (NO.)", 10.0))
                 
@@ -357,10 +379,18 @@ if df_fact is not None and not df_fact.empty:
                     'Unit': unit,
                     'QTY': qty,
                     'Rate': rate,
-                    'Total Amount': total
+                    'Total Amount': total,
+                    'prev_Type': p_type
                 })
                 
-            st.session_state.custom_boq_data = edited_df
+            # Critical optimization: Only write back to the session state dataframe if the dropdown changed
+            # This completely avoids resetting the data editor while typing inside the description cell!
+            if has_changes:
+                st.session_state.custom_boq_data = edited_df
+                st.rerun()
+            else:
+                st.session_state.custom_boq_data = edited_df
+                
             final_df = pd.DataFrame(final_rows)
             
             with col_no:
