@@ -310,13 +310,13 @@ if df_fact is not None and not df_fact.empty:
                 st.rerun()
 
             # ==========================================
-            # 🚀 BULK EXPORT ENGINE (ALL 36 PACKAGES)
+            # 🚀 BULK EXPORT ENGINE (ALL 18 PACKAGES)
             # ==========================================
             st.markdown("---")
             st.markdown("### 🚀 Bulk Export Engine")
-            st.warning("⚠️ **Warning:** Generating all 36 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
+            st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
             
-            if st.button("🔥 Generate & Export All 36 Options (One-Click)", type="primary", use_container_width=True):
+            if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary", use_container_width=True):
                 if not has_pypdf:
                     st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
                     st.stop()
@@ -324,7 +324,7 @@ if df_fact is not None and not df_fact.empty:
                 # Define iteration matrices
                 typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
                 packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
-                outdoors = ["Yes", "No"]
+                outdoors = ["No"] # STRICTLY SET TO 'No' TO REDUCE TO 18 OPTIONS
                 total_iters = len(typologies) * len(packages) * len(outdoors)
                 
                 # UI Feedback setup
