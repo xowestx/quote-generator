@@ -280,7 +280,6 @@ if df_fact is not None and not df_fact.empty:
 
         if st.button("➕ Generate Furniture Package BOQ", type="primary", use_container_width=True):
             pkg_code = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
-            pkg_name = fur_package.split(" ")[0]
             rooms_to_add = []
             
             # Rule 1: Core Foundations
@@ -304,11 +303,15 @@ if df_fact is not None and not df_fact.empty:
             if num_beds > 1:
                 rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code)})
                 
+            # Formatting the lookup name exactly as requested: "{Unit Typology}, {Furniture Package}, + Outdoor"
+            outdoor_text = ", + Outdoor" if fur_outdoors == "Yes" else ""
+            fur_request_name = f"{fur_unit_type}, {fur_package}{outdoor_text}"
+
             # Construct Final Staged Items
             new_staged = []
             for idx, r in enumerate(rooms_to_add):
                 total = r["qty"] * r["rate"]
-                full_desc = f"Supply & Install Furniture for {r['desc']} ({pkg_name} Package)"
+                full_desc = f"Supply and install Furniture for {r['desc']} as per attached design."
                 
                 new_staged.append({
                     'No.': idx + 1,
@@ -316,7 +319,8 @@ if df_fact is not None and not df_fact.empty:
                     'Unit': 'LS',
                     'QTY': r["qty"],
                     'Rate': r["rate"],
-                    'Total Amount': total
+                    'Total Amount': total,
+                    'Lookup Name': fur_request_name
                 })
             
             st.session_state.staged_items = new_staged
@@ -325,7 +329,7 @@ if df_fact is not None and not df_fact.empty:
         # Display Summary
         if st.session_state.staged_items:
             st.markdown("### 📊 Generated BOQ Summary")
-            summary_df = pd.DataFrame(st.session_state.staged_items)
+            summary_df = pd.DataFrame([{k: v for k, v in item.items() if k != 'Lookup Name'} for item in st.session_state.staged_items])
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
             
             subtotal = summary_df['Total Amount'].sum()
@@ -541,7 +545,7 @@ if df_fact is not None and not df_fact.empty:
                     with st.spinner("Transmitting to Google Workspace..."):
                         
                         resolved_req_name = selected_request_type
-                        if selected_request_type == "Roof Room" and 'Lookup Name' in st.session_state.staged_items[0]:
+                        if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
@@ -589,7 +593,7 @@ if df_fact is not None and not df_fact.empty:
                 pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
                 
                 disp_req_name = selected_request_type
-                if selected_request_type == "Roof Room" and 'Lookup Name' in st.session_state.staged_items[0]:
+                if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
                 pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
                 
