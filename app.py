@@ -5,13 +5,20 @@ from fpdf import FPDF
 import re
 import requests
 import json
+import base64
+import io
+
+# Import PDF Merger
+try:
+    from pypdf import PdfWriter
+    has_pypdf = True
+except ImportError:
+    has_pypdf = False
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
-
-# Hardcoded Webhook URL
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzt5KDoxG9DbYPXzFe7HiYJ6WgYdpsYE65p7Zuwnq6PycZdvbtGyCe_8G1OwwM3cxP/exec"
 
 @st.cache_data(ttl=60)
@@ -67,6 +74,9 @@ st.title("🏗️ Extra Works Quotation Engine")
 df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 
 if 'staged_items' not in st.session_state:
+    st.session_state.staged_items = []
+
+if st.session_state.staged_items and 'Calculated_Price' in st.session_state.staged_items[0]:
     st.session_state.staged_items = []
 
 if df_fact is not None and not df_fact.empty:
@@ -141,15 +151,11 @@ if df_fact is not None and not df_fact.empty:
         "Fence & Gates", "Pergola", "Landscape Modifications", "SOG", "Closing Elevator Shaft"
     ]
     
-    # Auto-clear staged items if changing master category to prevent data mismatch
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
     if st.session_state.get('last_master_request') != selected_request_type:
         st.session_state.staged_items = []
         st.session_state.last_master_request = selected_request_type
 
-    # -----------------------------------------------------------
-    # BRANCH A: ROOF ROOM
-    # -----------------------------------------------------------
     if selected_request_type == "Roof Room":
         prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
         desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
@@ -174,16 +180,13 @@ if df_fact is not None and not df_fact.empty:
             mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
             if mask.any(): filtered_catalog = filtered_catalog[mask]
                 
-        if filtered_catalog.empty:
-            filtered_catalog = df_products
+        if filtered_catalog.empty: filtered_catalog = df_products
 
         col_vr, col_fin = st.columns([2, 1])
-        
         with col_vr:
             def format_scope(idx):
                 row = filtered_catalog.loc[idx]
                 return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
-                
             chosen_idx = st.selectbox("Select Roof Room Variant", filtered_catalog.index, format_func=format_scope)
             product_record = filtered_catalog.loc[chosen_idx]
             chosen_cat = str(product_record.get(cat_col, "Roof Room"))
@@ -192,7 +195,6 @@ if df_fact is not None and not df_fact.empty:
             rate_cat_col = df_rates.columns[0]
             category_rates = df_rates[df_rates[rate_cat_col].str.upper() == chosen_cat.upper()]
             if category_rates.empty: category_rates = df_rates
-                
             rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
             rate_val_col = df_rates.columns[1]
             chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
@@ -207,8 +209,6 @@ if df_fact is not None and not df_fact.empty:
         except: unit_base_cost_rate = 0.0
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
-        
-        # Format QTY specifically safely avoiding .0 if it's a whole number
         formatted_qty = int(target_item_qty) if target_item_qty.is_integer() else target_item_qty
         custom_roof_description = f'Required Fees for adding {formatted_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
         
@@ -216,14 +216,9 @@ if df_fact is not None and not df_fact.empty:
         resolved_request_name = "Roof Room" + financing_name_suffix
         
         st.session_state.staged_items = [{
-            'No.': 1,
-            'Description': custom_roof_description,
-            'Unit': 'LS',
-            'QTY': 1.0,
-            'Rate': calculated_line_item_total,
-            'Total Amount': calculated_line_item_total,
-            'Financing Options': chosen_term_option,
-            'Lookup Name': resolved_request_name
+            'No.': 1, 'Description': custom_roof_description, 'Unit': 'LS', 'QTY': 1.0, 
+            'Rate': calculated_line_item_total, 'Total Amount': calculated_line_item_total,
+            'Financing Options': chosen_term_option, 'Lookup Name': resolved_request_name
         }]
         
         st.markdown("### 📊 Generated BOQ Summary")
@@ -238,35 +233,22 @@ if df_fact is not None and not df_fact.empty:
         col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
-    # -----------------------------------------------------------
-    # BRANCH B: FURNITURE PACKAGE ENGINE
-    # -----------------------------------------------------------
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Furniture Package Generator")
-        st.info("💡 **Rule Engine:** Select the inputs below. The system will automatically allocate the correct rooms, apply the rules (Master/Kids split, Nanny, Living, etc.), and pull the precise pricing matrix.")
+        st.info("💡 **Rule Engine:** Select inputs below. The system automatically allocates rooms and applies Master/Kids split logic.")
         
         col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            fur_unit_type = st.selectbox("Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
-        with col_f2:
-            fur_package = st.selectbox("Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
-        with col_f3:
-            fur_outdoors = st.selectbox("Include Outdoors?", ["Yes", "No"])
+        with col_f1: fur_unit_type = st.selectbox("Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
+        with col_f2: fur_package = st.selectbox("Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+        with col_f3: fur_outdoors = st.selectbox("Include Outdoors?", ["Yes", "No"])
             
-        # Robust Dynamic Rate Getter with Hardcoded Failsafe
         def get_fur_rate(keyword, pkg_code):
-            # Special bypass for Nanny since it has a fixed price and no L/D/R option
             if "NANNY" in keyword:
                 match = df_rates[df_rates.iloc[:,0].astype(str).str.upper().str.contains("NANNY", na=False)]
                 if not match.empty: return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
                 return 31914.96
-                
-            # Scan Google Sheet for Match
             match = df_rates[(df_rates.iloc[:,0].astype(str).str.upper().str.contains(keyword, na=False)) & (df_rates.iloc[:,2].astype(str).str.strip().str.upper() == pkg_code)]
-            if not match.empty:
-                return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
-                
-            # Failsafe Dictionary based exactly on User's provided matrix
+            if not match.empty: return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
             fallbacks = {
                 "RECEPTION_L": 225193.10, "RECEPTION_D": 168894.83, "RECEPTION_R": 126671.12,
                 "LIVING_L": 204958.27, "LIVING_D": 153718.70, "LIVING_R": 115289.03,
@@ -282,51 +264,33 @@ if df_fact is not None and not df_fact.empty:
             pkg_code = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
             rooms_to_add = []
             
-            # Rule 1: Core Foundations
             rooms_to_add.append({"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code)})
             rooms_to_add.append({"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code)})
             rooms_to_add.append({"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code)})
             
-            # Rule 2: Outdoors
-            if fur_outdoors == "Yes":
-                rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code)})
+            if fur_outdoors == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code)})
+            if "+N" in fur_unit_type: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code)})
+            if "+F" in fur_unit_type: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code)})
                 
-            # Rule 3: Letter Add-ons
-            if "+N" in fur_unit_type:
-                rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code)})
-            if "+F" in fur_unit_type:
-                rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code)})
-                
-            # Rule 4: Bedroom Split
             num_beds = int(fur_unit_type[0])
             rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code)})
-            if num_beds > 1:
-                rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code)})
+            if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code)})
                 
-            # Formatting the lookup name exactly as requested: "{Unit Typology}, {Furniture Package}, + Outdoor"
             outdoor_text = ", + Outdoor" if fur_outdoors == "Yes" else ""
             fur_request_name = f"{fur_unit_type}, {fur_package}{outdoor_text}"
 
-            # Construct Final Staged Items
             new_staged = []
             for idx, r in enumerate(rooms_to_add):
                 total = r["qty"] * r["rate"]
                 full_desc = f"Supply and install Furniture for {r['desc']} as per attached design."
-                
                 new_staged.append({
-                    'No.': idx + 1,
-                    'Description': full_desc,
-                    'Unit': 'LS',
-                    'QTY': r["qty"],
-                    'Rate': r["rate"],
-                    'Total Amount': total,
-                    'Lookup Name': fur_request_name
+                    'No.': idx + 1, 'Description': full_desc, 'Unit': 'LS', 'QTY': r["qty"], 'Rate': r["rate"],
+                    'Total Amount': total, 'Lookup Name': fur_request_name
                 })
             
             st.session_state.staged_items = new_staged
             st.toast("Furniture package generated successfully!")
 
-        # Display Summary
         if st.session_state.staged_items:
             st.markdown("### 📊 Generated BOQ Summary")
             summary_df = pd.DataFrame([{k: v for k, v in item.items() if k != 'Lookup Name'} for item in st.session_state.staged_items])
@@ -344,60 +308,29 @@ if df_fact is not None and not df_fact.empty:
                 st.session_state.staged_items = []
                 st.rerun()
 
-    # -----------------------------------------------------------
-    # BRANCH C: DYNAMIC DATA EDITOR WORKFLOW (CUSTOM TYPES)
-    # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.', 'Unit', 'Rate', and 'Total Amount' instantly.")
+        st.info("💡 **Tip:** Type smoothly in the center! The read-only previews calculate No., Unit, Rate, and Total instantly.")
         
-        # Initialize the editable dataframe based on request type
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
             if selected_request_type == "Land Extension":
-                initial_data = [{
-                    'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
-                    'Unit': 'M2',
-                    'QTY': 0.0,
-                    'Rate': 55000.0
-                }]
+                initial_data = [{'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.', 'Unit': 'M2', 'QTY': 0.0, 'Rate': 55000.0}]
             elif selected_request_type == "Pergola":
-                initial_data = [{
-                    'Type': 'Musky',
-                    'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.',
-                    'Area / QTY (NO.)': 10.0,
-                    'prev_Type': 'Musky'
-                }]
+                initial_data = [{'Type': 'Musky', 'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.', 'Area / QTY (NO.)': 10.0, 'prev_Type': 'Musky'}]
             else:
-                initial_data = [{
-                    'Description': '',
-                    'Unit': 'LS',
-                    'QTY': 1.0,
-                    'Rate': 0.0
-                }]
-            
+                initial_data = [{'Description': '', 'Unit': 'LS', 'QTY': 1.0, 'Rate': 0.0}]
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
         
-        # Pergola Specific Logic
         if selected_request_type == "Pergola":
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
-            
-            if 'prev_Type' not in st.session_state.custom_boq_data.columns:
-                st.session_state.custom_boq_data['prev_Type'] = st.session_state.custom_boq_data['Type']
+            if 'prev_Type' not in st.session_state.custom_boq_data.columns: st.session_state.custom_boq_data['prev_Type'] = st.session_state.custom_boq_data['Type']
                 
             with col_editor:
                 edited_df = st.data_editor(
-                    st.session_state.custom_boq_data,
-                    key="custom_boq_editor",
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
+                    st.session_state.custom_boq_data, key="custom_boq_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
                     column_order=["Type", "Description", "Area / QTY (NO.)"],
-                    column_config={
-                        "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch Pine", "Khashamonium", "Retractable"], default="Musky"),
-                        "Description": st.column_config.TextColumn("Description"),
-                        "Area / QTY (NO.)": st.column_config.NumberColumn("Area / QTY (NO.)", min_value=0.0, default=10.0)
-                    }
+                    column_config={"Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch Pine", "Khashamonium", "Retractable"], default="Musky"), "Description": st.column_config.TextColumn("Description"), "Area / QTY (NO.)": st.column_config.NumberColumn("Area / QTY (NO.)", min_value=0.0, default=10.0)}
                 )
                 
             PERGOLA_RULES = {
@@ -409,9 +342,7 @@ if df_fact is not None and not df_fact.empty:
             
             final_rows = []
             has_changes = False
-            
-            if 'prev_Type' not in edited_df.columns:
-                edited_df['prev_Type'] = edited_df['Type'].fillna('Musky')
+            if 'prev_Type' not in edited_df.columns: edited_df['prev_Type'] = edited_df['Type'].fillna('Musky')
 
             for idx, row in edited_df.iterrows():
                 p_type = row.get("Type", "Musky")
@@ -422,13 +353,10 @@ if df_fact is not None and not df_fact.empty:
                     resolved_desc = PERGOLA_RULES[p_type]["desc"]
                     edited_df.at[idx, "Description"] = resolved_desc
                     edited_df.at[idx, "prev_Type"] = p_type
-                    if p_type == "Retractable":
-                        edited_df.at[idx, "Area / QTY (NO.)"] = 1.0
-                    else:
-                        edited_df.at[idx, "Area / QTY (NO.)"] = 10.0
+                    if p_type == "Retractable": edited_df.at[idx, "Area / QTY (NO.)"] = 1.0
+                    else: edited_df.at[idx, "Area / QTY (NO.)"] = 10.0
                     has_changes = True
-                else:
-                    resolved_desc = current_desc
+                else: resolved_desc = current_desc
                 
                 qty_input = float(row.get("Area / QTY (NO.)", 10.0))
                 
@@ -439,26 +367,10 @@ if df_fact is not None and not df_fact.empty:
                     total = qty * rate
                 else:
                     base_rate = PERGOLA_RULES[p_type]["rate"]
-                    if qty_input < 10.0:
-                        unit = "LS"
-                        qty = 1.0
-                        rate = 10.0 * base_rate
-                        total = rate
-                    else:
-                        unit = "SQM"
-                        qty = qty_input
-                        rate = base_rate
-                        total = qty * rate
+                    if qty_input < 10.0: unit, qty, rate, total = "LS", 1.0, 10.0 * base_rate, 10.0 * base_rate
+                    else: unit, qty, rate, total = "SQM", qty_input, base_rate, qty_input * base_rate
                         
-                final_rows.append({
-                    'No.': idx + 1,
-                    'Description': resolved_desc,
-                    'Unit': unit,
-                    'QTY': qty,
-                    'Rate': rate,
-                    'Total Amount': total,
-                    'prev_Type': p_type
-                })
+                final_rows.append({'No.': idx + 1, 'Type': p_type, 'Description': resolved_desc, 'Area / QTY (NO.)': qty_input, 'Unit': unit, 'QTY': qty, 'Rate': rate, 'Total Amount': total, 'prev_Type': p_type})
                 
             if has_changes:
                 st.session_state.custom_boq_data = edited_df
@@ -467,36 +379,15 @@ if df_fact is not None and not df_fact.empty:
                 st.session_state.custom_boq_data = edited_df
                 
             final_df = pd.DataFrame(final_rows)
-            
-            with col_no:
-                st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
-            with col_total:
-                st.dataframe(
-                    final_df[['Unit', 'Rate', 'Total Amount']], 
-                    hide_index=True, 
-                    use_container_width=True,
-                    column_config={
-                        "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
-                        "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
-                    }
-                )
+            with col_no: st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
+            with col_total: st.dataframe(final_df[['Unit', 'Rate', 'Total Amount']], hide_index=True, use_container_width=True, column_config={"Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"), "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")})
 
-        # Standard Custom Types (Including Land Extension)
         else:
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
             with col_editor:
                 edited_df = st.data_editor(
-                    st.session_state.custom_boq_data,
-                    key="custom_boq_editor",
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Description": st.column_config.TextColumn("Description"),
-                        "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"),
-                        "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
-                        "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
-                    }
+                    st.session_state.custom_boq_data, key="custom_boq_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
+                    column_config={"Description": st.column_config.TextColumn("Description"), "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"), "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0), "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)}
                 )
             
             final_df = edited_df.copy()
@@ -505,15 +396,8 @@ if df_fact is not None and not df_fact.empty:
             final_df['Total Amount'] = final_df['QTY'] * final_df['Rate']
             final_df.insert(0, 'No.', range(1, len(final_df) + 1))
             
-            with col_no:
-                st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
-            with col_total:
-                st.dataframe(
-                    final_df[['Total Amount']], 
-                    hide_index=True, 
-                    use_container_width=True,
-                    column_config={"Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")}
-                )
+            with col_no: st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
+            with col_total: st.dataframe(final_df[['Total Amount']], hide_index=True, use_container_width=True, column_config={"Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")})
 
         st.session_state.staged_items = final_df.to_dict('records')
         summary_df = final_df
@@ -523,8 +407,7 @@ if df_fact is not None and not df_fact.empty:
         total_with_vat = subtotal + vat
         
         col_t1, col_t2 = st.columns(2)
-        if selected_request_type == "Land Extension":
-            col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        if selected_request_type == "Land Extension": col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         else:
             col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
             col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
@@ -536,7 +419,6 @@ if df_fact is not None and not df_fact.empty:
         summary_df = pd.DataFrame(st.session_state.staged_items)
         if not summary_df.empty:
             final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
-            
             st.markdown("##### Finalize Document Details")
             col_export1, col_export2 = st.columns(2)
             
@@ -549,6 +431,7 @@ if df_fact is not None and not df_fact.empty:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
+                            "action": "standard",
                             "unitId": selected_unit,
                             "clientName": final_client_name,
                             "zone": str(zone_name),
@@ -564,17 +447,77 @@ if df_fact is not None and not df_fact.empty:
                                 "rate": item.get("Rate", 0.0)
                             })
                             
+                        # Set up two-way PDF merger specifically for Furniture
+                        if selected_request_type == "Furniture":
+                            if not has_pypdf:
+                                st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
+                            else:
+                                payload["action"] = "generateDocOnly"
+                                fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
+                                if "[L]" in fur_package_name: pkg_code = "P1"
+                                elif "[D]" in fur_package_name: pkg_code = "P2"
+                                elif "[R]" in fur_package_name: pkg_code = "P3"
+                                else: pkg_code = "P1"
+                                payload["packageCode"] = pkg_code
+                                
                         try:
                             headers = {"Content-Type": "application/json"}
                             response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
                             
                             if response.status_code == 200:
                                 response_data = response.json()
-                                if response_data.get("status") == "success":
+                                
+                                # Process standard quote
+                                if response_data.get("status") == "success" and selected_request_type != "Furniture":
                                     st.success("✅ Quotation Generated Successfully!")
                                     st.session_state.doc_url = response_data.get('docUrl')
                                     st.session_state.pdf_url = response_data.get('pdfUrl')
                                     st.rerun()
+                                    
+                                # Process advanced 2-way Furniture PDF merge
+                                elif response_data.get("status") == "success" and selected_request_type == "Furniture":
+                                    st.toast("Compiling Room Designs. This may take 10-15 seconds...")
+                                    
+                                    merger = PdfWriter()
+                                    
+                                    # Base64 decode main doc
+                                    main_pdf_bytes = base64.b64decode(response_data["docBase64"])
+                                    merger.append(io.BytesIO(main_pdf_bytes))
+                                    
+                                    # Base64 decode and append all room docs
+                                    for room_b64 in response_data.get("roomBase64s", []):
+                                        room_bytes = base64.b64decode(room_b64)
+                                        try:
+                                            merger.append(io.BytesIO(room_bytes))
+                                        except Exception: pass
+                                            
+                                    output_pdf = io.BytesIO()
+                                    merger.write(output_pdf)
+                                    merged_bytes = output_pdf.getvalue()
+                                    
+                                    # Upload final PDF back to Drive
+                                    upload_payload = {
+                                        "action": "uploadPdf",
+                                        "docName": response_data["docName"],
+                                        "base64Pdf": base64.b64encode(merged_bytes).decode('utf-8'),
+                                        "serialNumber": response_data["serialNumber"],
+                                        "unitId": selected_unit,
+                                        "clientName": final_client_name,
+                                        "requestType": resolved_req_name,
+                                        "grandTotal": response_data["grandTotal"],
+                                        "zone": str(zone_name)
+                                    }
+                                    
+                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
+                                    up_data = up_res.json()
+                                    
+                                    if up_data.get("status") == "success":
+                                        st.success("✅ Quotation and Room Designs Compiled Successfully!")
+                                        st.session_state.doc_url = response_data['docUrl']
+                                        st.session_state.pdf_url = up_data['pdfUrl']
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Failed to save final PDF: {up_data.get('message')}")
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
@@ -596,7 +539,6 @@ if df_fact is not None and not df_fact.empty:
                 if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
                 pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
-                
                 pdf.ln(8)
                 
                 pdf.set_font("Helvetica", "B", 10)
