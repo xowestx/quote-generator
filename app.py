@@ -19,7 +19,6 @@ def load_all_tabs(base_url):
     try:
         sheet_id = base_url.split("/d/")[1].split("/")[0]
         
-        # Helper function to grab CSVs safely
         def get_csv(sheet_name):
             url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
             return pd.read_csv(url)
@@ -29,22 +28,16 @@ def load_all_tabs(base_url):
         rates = get_csv("RATES")
         terms = get_csv("TERMS_%26_CONDITIONS")
         
-        # Try CLIENT_NAME first. If Google gives us the FACT tab by mistake, try CLIENT NAME with a space.
         clients = get_csv("CLIENT_NAME")
         if not any('NAME' in str(c).upper() or 'CLIENT' in str(c).upper() for c in clients.columns):
-            clients = get_csv("CLIENT%20NAME") # Try with a space
+            clients = get_csv("CLIENT%20NAME")
         
-        # CORE FIX: Destroy all NaN (blank) cells immediately so Python never throws a TypeError
         for df in [facts, products, rates, clients, terms]:
             df.columns = [str(c).strip() for c in df.columns]
-            
-            # Fill numeric columns with 0 and non-numeric with empty strings to prevent dtype conflicts
             num_cols = df.select_dtypes(include=['number']).columns
             df[num_cols] = df[num_cols].fillna(0)
-            
             obj_cols = df.select_dtypes(exclude=['number']).columns
             df[obj_cols] = df[obj_cols].fillna('')
-            
             for col in df.select_dtypes(include=['object']).columns:
                 df[col] = df[col].astype(str).str.strip()
                 
@@ -58,7 +51,6 @@ def load_all_tabs(base_url):
 # ==========================================
 st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 
-# Persistent holding states for Webhook URLs to keep them across page interactions
 if 'doc_url' not in st.session_state:
     st.session_state.doc_url = None
 if 'pdf_url' not in st.session_state:
@@ -77,31 +69,23 @@ df_fact, df_products, df_rates, df_clients, df_terms = load_all_tabs(GSHEET_URL)
 if 'staged_items' not in st.session_state:
     st.session_state.staged_items = []
 
-# Fallback clear if old schema exists to prevent crashes
-if st.session_state.staged_items and 'Calculated_Price' in st.session_state.staged_items[0]:
-    st.session_state.staged_items = []
-
 if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_clients.columns[-1] if not df_clients.empty else None)
     
-    # --- SECTION 1: ASSET CONTEXT ANCHORING ---
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        # Use CLIENT_NAME tab for the dropdown list, filtering out empty/NaNs
         if client_unit_col:
             valid_units = [u for u in df_clients[client_unit_col].unique() if str(u).strip() and str(u).strip().upper() not in ['NAN', 'NONE']]
         else:
             valid_units = df_fact[fact_unit_id_col].unique()
         
-        # Sort the list alphabetically for easier navigation
         valid_units = sorted(list(set(valid_units)), key=lambda x: str(x))
         selected_unit = st.selectbox("Select Unit ID", valid_units)
         
-        # Fetch unit metadata from FACT tab safely
         unit_meta_df = df_fact[df_fact[fact_unit_id_col] == selected_unit]
         unit_meta = unit_meta_df.iloc[0] if not unit_meta_df.empty else {}
         
@@ -121,16 +105,13 @@ if df_fact is not None and not df_fact.empty:
         for row_idx in range(len(df_clients)):
             row = df_clients.iloc[row_idx]
             cleaned_cells = [super_clean(cell) for cell in row]
-            
             if safe_selected_unit in cleaned_cells:
                 raw_name = row.iloc[name_col_idx]
-                
                 if super_clean(raw_name) == safe_selected_unit:
                     for cell in row:
                         if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
                             raw_name = cell
                             break
-                            
                 db_client_name = str(raw_name).strip()
                 break
                     
@@ -150,7 +131,6 @@ if df_fact is not None and not df_fact.empty:
     
     st.divider()
 
-    # --- SECTION 2: REQUEST TYPE & ENGINEERING SCOPE ---
     st.subheader("2. Define Engineering Scope")
     
     request_options = [
@@ -161,10 +141,14 @@ if df_fact is not None and not df_fact.empty:
         "Fence & Gates", "Pergola", "Landscape Modifications", "SOG", "Closing Elevator Shaft"
     ]
     
+    # Auto-clear staged items if changing master category to prevent data mismatch
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
-    
+    if st.session_state.get('last_master_request') != selected_request_type:
+        st.session_state.staged_items = []
+        st.session_state.last_master_request = selected_request_type
+
     # -----------------------------------------------------------
-    # BRANCH A: DATABASE CATALOG WORKFLOW (ROOF ROOM ONLY)
+    # BRANCH A: ROOF ROOM
     # -----------------------------------------------------------
     if selected_request_type == "Roof Room":
         prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
@@ -176,7 +160,6 @@ if df_fact is not None and not df_fact.empty:
         target_design_opt = str(unit_design_opt).strip().upper()
         
         filtered_catalog = df_products.copy()
-        
         prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
         design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
@@ -184,11 +167,9 @@ if df_fact is not None and not df_fact.empty:
         if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
             mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
             if mask.any(): filtered_catalog = filtered_catalog[mask]
-                
         if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
             mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
             if mask.any(): filtered_catalog = filtered_catalog[mask]
-                
         if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
             mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
             if mask.any(): filtered_catalog = filtered_catalog[mask]
@@ -210,30 +191,28 @@ if df_fact is not None and not df_fact.empty:
         with col_fin:
             rate_cat_col = df_rates.columns[0]
             category_rates = df_rates[df_rates[rate_cat_col].str.upper() == chosen_cat.upper()]
-            if category_rates.empty:
-                category_rates = df_rates
+            if category_rates.empty: category_rates = df_rates
                 
             rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
             rate_val_col = df_rates.columns[1]
             chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
             rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
 
-        try:
-            target_item_qty = float(product_record[prod_area_col])
-        except:
-            target_item_qty = 0.0
+        try: target_item_qty = float(product_record[prod_area_col])
+        except: target_item_qty = 0.0
             
         try:
             rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
             unit_base_cost_rate = float(rate_val)
-        except:
-            unit_base_cost_rate = 0.0
+        except: unit_base_cost_rate = 0.0
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
-        custom_roof_description = f'Required Fees for adding {target_item_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
         
-        # Build Roof Room dynamic name depending on financing chosen
-        financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 2 Years"
+        # Format QTY specifically safely avoiding .0 if it's a whole number
+        formatted_qty = int(target_item_qty) if target_item_qty.is_integer() else target_item_qty
+        custom_roof_description = f'Required Fees for adding {formatted_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
+        
+        financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 24 months" if "24" in str(chosen_term_option) else " - 2 Years"
         resolved_request_name = "Roof Room" + financing_name_suffix
         
         st.session_state.staged_items = [{
@@ -260,13 +239,115 @@ if df_fact is not None and not df_fact.empty:
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     # -----------------------------------------------------------
-    # BRANCH B: DYNAMIC DATA EDITOR WORKFLOW (ALL OTHER TYPES)
+    # BRANCH B: FURNITURE PACKAGE ENGINE
+    # -----------------------------------------------------------
+    elif selected_request_type == "Furniture":
+        st.markdown("### 🛋️ Furniture Package Generator")
+        st.info("💡 **Rule Engine:** Select the inputs below. The system will automatically allocate the correct rooms, apply the rules (Master/Kids split, Nanny, Living, etc.), and pull the precise pricing matrix.")
+        
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            fur_unit_type = st.selectbox("Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
+        with col_f2:
+            fur_package = st.selectbox("Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+        with col_f3:
+            fur_outdoors = st.selectbox("Include Outdoors?", ["Yes", "No"])
+            
+        # Robust Dynamic Rate Getter with Hardcoded Failsafe
+        def get_fur_rate(keyword, pkg_code):
+            # Special bypass for Nanny since it has a fixed price and no L/D/R option
+            if "NANNY" in keyword:
+                match = df_rates[df_rates.iloc[:,0].astype(str).str.upper().str.contains("NANNY", na=False)]
+                if not match.empty: return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
+                return 31914.96
+                
+            # Scan Google Sheet for Match
+            match = df_rates[(df_rates.iloc[:,0].astype(str).str.upper().str.contains(keyword, na=False)) & (df_rates.iloc[:,2].astype(str).str.strip().str.upper() == pkg_code)]
+            if not match.empty:
+                return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
+                
+            # Failsafe Dictionary based exactly on User's provided matrix
+            fallbacks = {
+                "RECEPTION_L": 225193.10, "RECEPTION_D": 168894.83, "RECEPTION_R": 126671.12,
+                "LIVING_L": 204958.27, "LIVING_D": 153718.70, "LIVING_R": 115289.03,
+                "DINING_L": 245996.63, "DINING_D": 184497.47, "DINING_R": 138373.10,
+                "MASTER BEDROOM_L": 230736.11, "MASTER BEDROOM_D": 173052.08, "MASTER BEDROOM_R": 129789.06,
+                "KIDS BEDROOM_L": 199236.18, "KIDS BEDROOM_D": 149427.14, "KIDS BEDROOM_R": 112070.35,
+                "TERRACE_L": 31262.77, "TERRACE_D": 12829.63, "TERRACE_R": 9803.42,
+                "OUTDOORS_L": 64153.21, "OUTDOORS_D": 48114.91, "OUTDOORS_R": 36086.18
+            }
+            return fallbacks.get(f"{keyword}_{pkg_code}", 0.0)
+
+        if st.button("➕ Generate Furniture Package BOQ", type="primary", use_container_width=True):
+            pkg_code = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
+            pkg_name = fur_package.split(" ")[0]
+            rooms_to_add = []
+            
+            # Rule 1: Core Foundations
+            rooms_to_add.append({"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code)})
+            rooms_to_add.append({"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code)})
+            rooms_to_add.append({"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code)})
+            
+            # Rule 2: Outdoors
+            if fur_outdoors == "Yes":
+                rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code)})
+                
+            # Rule 3: Letter Add-ons
+            if "+N" in fur_unit_type:
+                rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code)})
+            if "+F" in fur_unit_type:
+                rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code)})
+                
+            # Rule 4: Bedroom Split
+            num_beds = int(fur_unit_type[0])
+            rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code)})
+            if num_beds > 1:
+                rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code)})
+                
+            # Construct Final Staged Items
+            new_staged = []
+            for idx, r in enumerate(rooms_to_add):
+                total = r["qty"] * r["rate"]
+                full_desc = f"Supply & Install Furniture for {r['desc']} ({pkg_name} Package)"
+                
+                new_staged.append({
+                    'No.': idx + 1,
+                    'Description': full_desc,
+                    'Unit': 'LS',
+                    'QTY': r["qty"],
+                    'Rate': r["rate"],
+                    'Total Amount': total
+                })
+            
+            st.session_state.staged_items = new_staged
+            st.toast("Furniture package generated successfully!")
+
+        # Display Summary
+        if st.session_state.staged_items:
+            st.markdown("### 📊 Generated BOQ Summary")
+            summary_df = pd.DataFrame(st.session_state.staged_items)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            subtotal = summary_df['Total Amount'].sum()
+            vat = subtotal * 0.14
+            total_with_vat = subtotal + vat
+
+            col_t1, col_t2 = st.columns(2)
+            col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+            col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+            
+            if st.button("❌ Clear Furniture Package", type="secondary"):
+                st.session_state.staged_items = []
+                st.rerun()
+
+    # -----------------------------------------------------------
+    # BRANCH C: DYNAMIC DATA EDITOR WORKFLOW (CUSTOM TYPES)
     # -----------------------------------------------------------
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
-        st.info("💡 **Tip:** Type smoothly in the center columns! The read-only previews on the left and right compute No., Unit, Rate, and Total instantly.")
+        st.info("💡 **Tip:** Type smoothly in the center! The read-only preview tables on the left and right calculate your 'No.', 'Unit', 'Rate', and 'Total Amount' instantly.")
         
-        # Isolate the editable table data perfectly to prevent refresh loop deletion
+        # Initialize the editable dataframe based on request type
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
             if selected_request_type == "Land Extension":
                 initial_data = [{
@@ -293,23 +374,21 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
         
-        # Split layout dynamically depending on product type to keep split screen layout
+        # Pergola Specific Logic
         if selected_request_type == "Pergola":
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
             
-            # Make sure prev_Type column exists in the dataframe
             if 'prev_Type' not in st.session_state.custom_boq_data.columns:
                 st.session_state.custom_boq_data['prev_Type'] = st.session_state.custom_boq_data['Type']
                 
             with col_editor:
-                # Interactive grid with ONLY the editable columns to ensure 100% stable input
                 edited_df = st.data_editor(
                     st.session_state.custom_boq_data,
                     key="custom_boq_editor",
                     num_rows="dynamic",
                     use_container_width=True,
                     hide_index=True,
-                    column_order=["Type", "Description", "Area / QTY (NO.)"], # Hide prev_Type from UI
+                    column_order=["Type", "Description", "Area / QTY (NO.)"],
                     column_config={
                         "Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch Pine", "Khashamonium", "Retractable"], default="Musky"),
                         "Description": st.column_config.TextColumn("Description"),
@@ -317,7 +396,6 @@ if df_fact is not None and not df_fact.empty:
                     }
                 )
                 
-            # Perform background calculation engine for Pergola
             PERGOLA_RULES = {
                 "Musky": {"rate": 4320.0, "desc": 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.'},
                 "Pitch Pine": {"rate": 7080.0, "desc": 'Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.'},
@@ -328,7 +406,6 @@ if df_fact is not None and not df_fact.empty:
             final_rows = []
             has_changes = False
             
-            # Ensure edited_df has the prev_Type column to avoid KeyErrors
             if 'prev_Type' not in edited_df.columns:
                 edited_df['prev_Type'] = edited_df['Type'].fillna('Musky')
 
@@ -337,12 +414,10 @@ if df_fact is not None and not df_fact.empty:
                 prev_type = row.get("prev_Type", "")
                 current_desc = str(row.get("Description", "")).strip()
                 
-                # Check if the row is brand new or if the Type has been changed
                 if pd.isna(prev_type) or p_type != prev_type:
                     resolved_desc = PERGOLA_RULES[p_type]["desc"]
                     edited_df.at[idx, "Description"] = resolved_desc
                     edited_df.at[idx, "prev_Type"] = p_type
-                    # Also set default area based on Type
                     if p_type == "Retractable":
                         edited_df.at[idx, "Area / QTY (NO.)"] = 1.0
                     else:
@@ -373,9 +448,7 @@ if df_fact is not None and not df_fact.empty:
                         
                 final_rows.append({
                     'No.': idx + 1,
-                    'Type': p_type,
                     'Description': resolved_desc,
-                    'Area / QTY (NO.)': qty_input,
                     'Unit': unit,
                     'QTY': qty,
                     'Rate': rate,
@@ -383,8 +456,6 @@ if df_fact is not None and not df_fact.empty:
                     'prev_Type': p_type
                 })
                 
-            # Critical optimization: Only write back to the session state dataframe if the dropdown changed
-            # This completely avoids resetting the data editor while typing inside the description cell!
             if has_changes:
                 st.session_state.custom_boq_data = edited_df
                 st.rerun()
@@ -405,6 +476,8 @@ if df_fact is not None and not df_fact.empty:
                         "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
                     }
                 )
+
+        # Standard Custom Types (Including Land Extension)
         else:
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
             with col_editor:
@@ -448,177 +521,186 @@ if df_fact is not None and not df_fact.empty:
         col_t1, col_t2 = st.columns(2)
         if selected_request_type == "Land Extension":
             col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-            # Drop VAT reference display metrics completely for Land Extension
         else:
             col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
             col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     st.divider()
 
-    # --- SECTION 3: EXPORT BUTTONS (SHARED) ---
-    if st.session_state.staged_items and not summary_df.empty:
-        final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
-        
-        st.markdown("##### Finalize Document Details")
-        col_export1, col_export2 = st.columns(2)
-        
-        with col_export1:
-            if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
-                with st.spinner("Transmitting to Google Workspace..."):
-                    payload = {
-                        "unitId": selected_unit,
-                        "clientName": final_client_name,
-                        "zone": str(zone_name),
-                        "requestType": selected_request_type if selected_request_type != "Roof Room" else st.session_state.staged_items[0].get('Lookup Name', 'Roof Room'), 
-                        "items": []
-                    }
-                    
-                    for item in st.session_state.staged_items:
-                        payload["items"].append({
-                            "description": item.get("Description", ""),
-                            "unit": item.get("Unit", "LS"),
-                            "qty": item.get("QTY", 1.0),
-                            "rate": item.get("Rate", 0.0)
-                        })
+    # --- SECTION 4: EXPORT BUTTONS (SHARED) ---
+    if st.session_state.staged_items:
+        summary_df = pd.DataFrame(st.session_state.staged_items)
+        if not summary_df.empty:
+            final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
+            
+            st.markdown("##### Finalize Document Details")
+            col_export1, col_export2 = st.columns(2)
+            
+            with col_export1:
+                if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
+                    with st.spinner("Transmitting to Google Workspace..."):
                         
-                    try:
-                        headers = {"Content-Type": "application/json"}
-                        response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                        resolved_req_name = selected_request_type
+                        if selected_request_type == "Roof Room" and 'Lookup Name' in st.session_state.staged_items[0]:
+                            resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
+
+                        payload = {
+                            "unitId": selected_unit,
+                            "clientName": final_client_name,
+                            "zone": str(zone_name),
+                            "requestType": resolved_req_name, 
+                            "items": []
+                        }
                         
-                        if response.status_code == 200:
-                            response_data = response.json()
-                            if response_data.get("status") == "success":
-                                st.success("✅ Quotation Generated Successfully!")
-                                # Safely hold URLs in session state
-                                st.session_state.doc_url = response_data.get('docUrl')
-                                st.session_state.pdf_url = response_data.get('pdfUrl')
-                                st.rerun()
+                        for item in st.session_state.staged_items:
+                            payload["items"].append({
+                                "description": item.get("Description", ""),
+                                "unit": item.get("Unit", "LS"),
+                                "qty": item.get("QTY", 1.0),
+                                "rate": item.get("Rate", 0.0)
+                            })
+                            
+                        try:
+                            headers = {"Content-Type": "application/json"}
+                            response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                            
+                            if response.status_code == 200:
+                                response_data = response.json()
+                                if response_data.get("status") == "success":
+                                    st.success("✅ Quotation Generated Successfully!")
+                                    st.session_state.doc_url = response_data.get('docUrl')
+                                    st.session_state.pdf_url = response_data.get('pdfUrl')
+                                    st.rerun()
+                                else:
+                                    st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
-                                st.error(f"Apps Script Error: {response_data.get('message')}")
-                        else:
-                            st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
-                    except Exception as e:
-                        st.error(f"Connection failed: {e}")
+                                st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
+                        except Exception as e:
+                            st.error(f"Connection failed: {e}")
 
-        with col_export2:
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
-            pdf.set_font("Helvetica", "", 12)
-            pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-            pdf.cell(0, 10, f"Client Reference Name: {final_client_name}", ln=True)
-            pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
-            pdf.cell(0, 10, f"Request Type: {selected_request_type}", ln=True)
-            pdf.ln(8)
-            
-            # Simple 6-column PDF Header
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(10, 8, "No.", border=1, align="C")
-            pdf.cell(90, 8, "Description", border=1)
-            pdf.cell(15, 8, "Unit", border=1, align="C")
-            pdf.cell(15, 8, "QTY", border=1, align="C")
-            pdf.cell(30, 8, "Rate", border=1, align="C")
-            pdf.cell(30, 8, "Total", border=1, align="C", ln=True)
-            
-            pdf.set_font("Helvetica", "", 9)
-            for _, item_row in summary_df.iterrows():
-                pdf.cell(10, 8, str(item_row.get('No.', '')), border=1, align="C")
-                pdf.cell(90, 8, str(item_row.get('Description', ''))[:45], border=1)
-                pdf.cell(15, 8, str(item_row.get('Unit', '')), border=1, align="C")
-                pdf.cell(15, 8, str(item_row.get('QTY', '')), border=1, align="C")
-                pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
-                pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
+            with col_export2:
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 16)
+                pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
+                pdf.set_font("Helvetica", "", 12)
+                pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
+                pdf.cell(0, 10, f"Client Reference Name: {final_client_name}", ln=True)
+                pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
                 
-            pdf.ln(6)
-            pdf.set_font("Helvetica", "B", 11)
-            if selected_request_type == "Land Extension":
-                pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
-            else:
-                pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
-                pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
-            pdf.ln(4)
-            
-            # Terms and Conditions (Only pulls if Financing Options exists on Roof Room)
-            if 'Financing Options' in st.session_state.staged_items[0] and selected_request_type == "Roof Room":
+                disp_req_name = selected_request_type
+                if selected_request_type == "Roof Room" and 'Lookup Name' in st.session_state.staged_items[0]:
+                    disp_req_name = st.session_state.staged_items[0]['Lookup Name']
+                pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
+                
+                pdf.ln(8)
+                
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.cell(10, 8, "No.", border=1, align="C")
+                pdf.cell(90, 8, "Description", border=1)
+                pdf.cell(15, 8, "Unit", border=1, align="C")
+                pdf.cell(15, 8, "QTY", border=1, align="C")
+                pdf.cell(30, 8, "Rate", border=1, align="C")
+                pdf.cell(30, 8, "Total", border=1, align="C", ln=True)
+                
+                pdf.set_font("Helvetica", "", 9)
+                for _, item_row in summary_df.iterrows():
+                    pdf.cell(10, 8, str(item_row.get('No.', '')), border=1, align="C")
+                    pdf.cell(90, 8, str(item_row.get('Description', ''))[:45], border=1)
+                    pdf.cell(15, 8, str(item_row.get('Unit', '')), border=1, align="C")
+                    pdf.cell(15, 8, str(item_row.get('QTY', '')), border=1, align="C")
+                    pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
+                    pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
+                    
+                pdf.ln(6)
                 pdf.set_font("Helvetica", "B", 11)
-                pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
-                pdf.set_font("Helvetica", "", 8)
                 
-                terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
-                terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
+                subtotal = summary_df['Total Amount'].sum()
+                vat = subtotal * 0.14
+                total_with_vat = subtotal + vat
                 
-                rule_term = st.session_state.staged_items[0].get('Financing Options')
-                lookup_request_name = st.session_state.staged_items[0].get('Lookup Name', 'Roof Room')
-                
-                # Filter by both Name and Financing Option
-                matched_legal_text_blocks = df_terms[
-                    (df_terms[terms_opt_col] == rule_term) & 
-                    (df_terms[df_terms.columns[0]].str.upper() == lookup_request_name.upper())
-                ][terms_text_col].values
-                
-                if len(matched_legal_text_blocks) > 0:
-                    pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
+                if selected_request_type == "Land Extension":
+                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
                 else:
-                    # Fallback to loose lookup
-                    matched_fallback = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
-                    if len(matched_fallback) > 0:
-                        pdf.multi_cell(0, 4, str(matched_fallback[0]))
-                pdf.ln(2)
-            
-            try:
-                pdf_out = pdf.output(dest="S")
-                if isinstance(pdf_out, str):
-                    compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
-                else:
-                    compiled_pdf_payload = bytes(pdf_out)
-            except AttributeError:
-                compiled_pdf_payload = bytes(pdf.output(dest="S"))
-            
-            st.download_button(
-                label="📄 Download Quick PDF Preview",
-                data=compiled_pdf_payload,
-                file_name=f"O_West_Proposal_{final_client_name.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
+                    pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
+                pdf.ln(4)
+                
+                if 'Financing Options' in st.session_state.staged_items[0] and selected_request_type == "Roof Room":
+                    pdf.set_font("Helvetica", "B", 11)
+                    pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
+                    pdf.set_font("Helvetica", "", 8)
+                    
+                    terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
+                    terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
+                    
+                    rule_term = st.session_state.staged_items[0].get('Financing Options')
+                    lookup_request_name = st.session_state.staged_items[0].get('Lookup Name', 'Roof Room')
+                    
+                    matched_legal_text_blocks = df_terms[
+                        (df_terms[terms_opt_col] == rule_term) & 
+                        (df_terms[df_terms.columns[0]].str.upper() == lookup_request_name.upper())
+                    ][terms_text_col].values
+                    
+                    if len(matched_legal_text_blocks) > 0:
+                        pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
+                    else:
+                        matched_fallback = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
+                        if len(matched_fallback) > 0:
+                            pdf.multi_cell(0, 4, str(matched_fallback[0]))
+                    pdf.ln(2)
+                
+                try:
+                    pdf_out = pdf.output(dest="S")
+                    if isinstance(pdf_out, str):
+                        compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
+                    else:
+                        compiled_pdf_payload = bytes(pdf_out)
+                except AttributeError:
+                    compiled_pdf_payload = bytes(pdf.output(dest="S"))
+                
+                st.download_button(
+                    label="📄 Download Quick PDF Preview",
+                    data=compiled_pdf_payload,
+                    file_name=f"O_West_Proposal_{final_client_name.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
-        # Show Document Hub if URLs have been generated
-        if st.session_state.doc_url and st.session_state.pdf_url:
-            st.markdown("### 📥 Generated Proposal Documents")
-            st.success("Files successfully compiled inside Google Workspace!")
-            
-            col_l1, col_l2, col_l3 = st.columns(3)
-            with col_l1:
-                st.link_button("📄 Open Google Doc Editor", st.session_state.doc_url, use_container_width=True)
-            with col_l2:
-                st.link_button("💾 View / Download PDF", st.session_state.pdf_url, use_container_width=True)
-            with col_l3:
-                # Web share API integration using a pure, 100% safe replacement model (No f-string syntax errors)
-                js_share_component = """
-                <button id="shareBtn" style="width:100%; height:45px; background-color:#25D366; color:white; border:none; border-radius:5px; font-weight:bold; font-size:16px; cursor:pointer;">
-                    🟢 Share PDF over WhatsApp / Mobile
-                </button>
-                <script>
-                document.getElementById('shareBtn').addEventListener('click', () => {
-                    if (navigator.share) {
-                        navigator.share({
-                            title: 'O West Proposal',
-                            text: 'Dear Client, Please find the attached O West Quotation Proposal for Unit UNIT_PLACEHOLDER.',
-                            url: 'URL_PLACEHOLDER'
-                        }).then(() => {
-                            console.log('Successfully shared proposal');
-                        }).catch((err) => {
-                            console.log('Error sharing', err);
-                        });
-                    } else {
-                        // Fallback to opening the PDF directly if share sheet is unavailable
-                        window.open('URL_PLACEHOLDER', '_blank');
-                    }
-                });
-                </script>
-                """.replace("URL_PLACEHOLDER", st.session_state.pdf_url).replace("UNIT_PLACEHOLDER", selected_unit)
+            # Document Hub Display
+            if st.session_state.doc_url and st.session_state.pdf_url:
+                st.markdown("### 📥 Generated Proposal Documents")
+                st.success("Files successfully compiled inside Google Workspace!")
                 
-                st.components.v1.html(js_share_component, height=55)
+                col_l1, col_l2, col_l3 = st.columns(3)
+                with col_l1:
+                    st.link_button("📄 Open Google Doc Editor", st.session_state.doc_url, use_container_width=True)
+                with col_l2:
+                    st.link_button("💾 View / Download PDF", st.session_state.pdf_url, use_container_width=True)
+                with col_l3:
+                    js_share_component = """
+                    <button id="shareBtn" style="width:100%; height:45px; background-color:#25D366; color:white; border:none; border-radius:5px; font-weight:bold; font-size:16px; cursor:pointer;">
+                        🟢 Share PDF over WhatsApp / Mobile
+                    </button>
+                    <script>
+                    document.getElementById('shareBtn').addEventListener('click', () => {
+                        if (navigator.share) {
+                            navigator.share({
+                                title: 'O West Proposal',
+                                text: 'Dear Client, Please find the attached O West Quotation Proposal for Unit UNIT_PLACEHOLDER.',
+                                url: 'URL_PLACEHOLDER'
+                            }).then(() => {
+                                console.log('Successfully shared proposal');
+                            }).catch((err) => {
+                                console.log('Error sharing', err);
+                            });
+                        } else {
+                            window.open('URL_PLACEHOLDER', '_blank');
+                        }
+                    });
+                    </script>
+                    """.replace("URL_PLACEHOLDER", st.session_state.pdf_url).replace("UNIT_PLACEHOLDER", selected_unit)
+                    
+                    st.components.v1.html(js_share_component, height=55)
 else:
     st.info("Awaiting structural backend database connection strings...")
