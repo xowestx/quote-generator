@@ -425,13 +425,24 @@ if df_fact is not None and not df_fact.empty:
 
     elif selected_request_type == "Furniture":
         st.markdown(f"### 🛋️ Furniture Package Generator (Custom Room-by-Room)")
-        st.info("💡 **Custom Mode:** Select your package, then add rooms manually below. Base rates are pulled exclusively from the 'O' option. Multipliers applied automatically: 1.0 (Luxury), 0.7 (Deluxe), 0.35 (Rent).")
+        st.info("💡 **Custom Mode:** Select your package name for the title, then add specific rooms manually below. Rates are pulled exactly as selected using the 'O' option from the rates tab.")
         st.warning("⚠️ **PDF Merging Active:** This request will merge individual room PDFs into the final quotation document.")
         
-        fur_package = st.selectbox("Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+        fur_package = st.selectbox("Furniture Package Document Title", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+        
+        room_options = [
+            "RECEPTION - P1", "RECEPTION - P2", "RECEPTION - P3",
+            "LIVING ROOM - P1", "LIVING ROOM - P2", "LIVING ROOM - P3",
+            "DINING ROOM - P1", "DINING ROOM - P2",
+            "MASTER BEDROOM - P1", "MASTER BEDROOM - P2", "MASTER BEDROOM - P3",
+            "KIDS BEDROOM - P1", "KIDS BEDROOM - P2",
+            "NANNY'S ROOM",
+            "TERRACE - P1", "TERRACE - P2", "TERRACE - P3",
+            "OUTDOORS - P1", "OUTDOORS - P2"
+        ]
         
         if 'custom_fur_data' not in st.session_state or st.session_state.get('last_type') != "Furniture":
-            initial_fur_data = [{'Room Type': 'Reception', 'QTY': 1.0}]
+            initial_fur_data = [{'Room Type': 'RECEPTION - P1', 'QTY': 1.0}]
             st.session_state.custom_fur_data = pd.DataFrame(initial_fur_data)
             st.session_state.last_type = "Furniture"
             
@@ -440,7 +451,7 @@ if df_fact is not None and not df_fact.empty:
             edited_fur_df = st.data_editor(
                 st.session_state.custom_fur_data, key="custom_fur_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
                 column_config={
-                    "Room Type": st.column_config.SelectboxColumn("Room Type", options=["Reception", "Living Room", "Dining Room", "Master Bedroom", "Kids Bedroom", "Nanny's Room", "Terrace", "Outdoors"], default="Reception"),
+                    "Room Type": st.column_config.SelectboxColumn("Room Type", options=room_options, default="RECEPTION - P1"),
                     "QTY": st.column_config.NumberColumn("QTY", min_value=1.0, default=1.0)
                 }
             )
@@ -448,11 +459,11 @@ if df_fact is not None and not df_fact.empty:
         st.session_state.custom_fur_data = edited_fur_df
         
         def get_base_fur_rate_option_o(room_name):
-            search_term = "NANNY" if "Nanny" in room_name else room_name.upper()
+            search_term = str(room_name).upper().strip()
             
-            # Fetch specifically using Option "O"
+            # Fetch specifically using Option "O" and exact string match
             match = df_rates[
-                (df_rates.iloc[:,0].astype(str).str.upper().str.contains(search_term, na=False)) & 
+                (df_rates.iloc[:,0].astype(str).str.upper().str.strip() == search_term) & 
                 (df_rates.iloc[:,2].astype(str).str.strip().str.upper() == "O")
             ]
             if not match.empty: 
@@ -460,26 +471,24 @@ if df_fact is not None and not df_fact.empty:
             
             # Fallbacks derived directly from provided 'O' options
             fallbacks = {
-                "RECEPTION": 225193.10, "LIVING ROOM": 204958.27, "DINING ROOM": 201455.32,
-                "MASTER BEDROOM": 230736.11, "KIDS BEDROOM": 199236.18, "NANNY'S ROOM": 31914.96,
-                "TERRACE": 31262.77, "OUTDOORS": 49704.38
+                "RECEPTION - P1": 225193.10, "RECEPTION - P2": 204637.62, "RECEPTION - P3": 183530.38,
+                "LIVING ROOM - P1": 204958.27, "LIVING ROOM - P2": 196108.33, "LIVING ROOM - P3": 193405.19,
+                "DINING ROOM - P1": 201455.32, "DINING ROOM - P2": 245996.63,
+                "MASTER BEDROOM - P1": 230736.11, "MASTER BEDROOM - P2": 194754.34, "MASTER BEDROOM - P3": 230557.03,
+                "KIDS BEDROOM - P1": 199236.18, "KIDS BEDROOM - P2": 182723.31,
+                "NANNY'S ROOM": 31914.96,
+                "TERRACE - P1": 31262.77, "TERRACE - P2": 12829.63, "TERRACE - P3": 9803.42,
+                "OUTDOORS - P1": 49704.38, "OUTDOORS - P2": 64153.21
             }
-            for fb_key, fb_val in fallbacks.items():
-                if search_term in fb_key:
-                    return fb_val
-            return 0.0
+            return fallbacks.get(search_term, 0.0)
 
-        multiplier = 1.0 if "Luxury" in fur_package else 0.7 if "Deluxe" in fur_package else 0.35
-        
         final_fur_rows = []
         for idx, row in edited_fur_df.iterrows():
-            room = row.get("Room Type", "Reception")
+            room = row.get("Room Type", "RECEPTION - P1")
             qty = float(row.get("QTY", 1.0))
             
-            base_rate = get_base_fur_rate_option_o(room)
-            
-            # Nanny room fixed, others use multiplier
-            actual_rate = base_rate if "Nanny" in room else base_rate * multiplier
+            # Exact rate calculation
+            actual_rate = get_base_fur_rate_option_o(room)
             total = qty * actual_rate
             desc = f"Supply and install Furniture for {room} as per attached design."
             
