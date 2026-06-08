@@ -314,141 +314,143 @@ if df_fact is not None and not df_fact.empty:
             # ==========================================
             # 🚀 BULK EXPORT ENGINE (ALL 18 PACKAGES)
             # ==========================================
-            st.markdown("---")
-            st.markdown("### 🚀 Bulk Export Engine")
-            st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
-            
-            if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary", use_container_width=True):
+            if selected_request_type == "Furniture BULK":
+                st.markdown("---")
+                st.markdown("### 🚀 Bulk Export Engine")
+                st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
                 
-                # Define iteration matrices
-                typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
-                packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
-                outdoors = ["No"] # STRICTLY SET TO 'No' TO REDUCE TO 18 OPTIONS
-                total_iters = len(typologies) * len(packages) * len(outdoors)
-                
-                # UI Feedback setup
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
-                headers = {"Content-Type": "application/json"}
-                success_count = 0
-                current_iter = 0
-                
-                for t in typologies:
-                    for p in packages:
-                        for o in outdoors:
-                            current_iter += 1
-                            
-                            # 1. Resolve Package Codes & Variables
-                            pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
-                            payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
-                            
-                            outdoor_text = ", + Outdoor" if o == "Yes" else ""
-                            fur_request_name = f"{t}, {p}{outdoor_text}"
-                            status_text.text(f"⚙️ Compiling {current_iter}/{total_iters}: {fur_request_name}...")
-                            
-                            # 2. Build Automated BOQ for this specific combination
-                            rooms_to_add = [
-                                {"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code_letter)},
-                                {"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code_letter)},
-                                {"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code_letter)}
-                            ]
-                            if o == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code_letter)})
-                            if "+N" in t: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code_letter)})
-                            if "+F" in t: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code_letter)})
-                            
-                            num_beds = int(t[0])
-                            rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code_letter)})
-                            if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code_letter)})
-                            
-                            staged_items_payload = []
-                            for r in rooms_to_add:
-                                staged_items_payload.append({
-                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
-                                    "unit": "LS", "qty": r["qty"], "rate": r["rate"]
-                                })
+                # Removed 'use_container_width=True' to make the button smaller and neater
+                if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary"):
+                    
+                    # Define iteration matrices
+                    typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
+                    packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
+                    outdoors = ["No"] # STRICTLY SET TO 'No' TO REDUCE TO 18 OPTIONS
+                    total_iters = len(typologies) * len(packages) * len(outdoors)
+                    
+                    # UI Feedback setup
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
+                    headers = {"Content-Type": "application/json"}
+                    success_count = 0
+                    current_iter = 0
+                    
+                    for t in typologies:
+                        for p in packages:
+                            for o in outdoors:
+                                current_iter += 1
                                 
-                            if selected_request_type == "Furniture BULK":
-                                if not has_pypdf:
-                                    st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
-                                    st.stop()
-                                    
-                                payload = {
-                                    "action": "generateDocOnly",
-                                    "packageCode": payload_pkg_code,
-                                    "unitId": selected_unit,
-                                    "clientName": final_client_name,
-                                    "zone": str(zone_name),
-                                    "requestType": fur_request_name,
-                                    "items": staged_items_payload
-                                }
+                                # 1. Resolve Package Codes & Variables
+                                pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
+                                payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
                                 
-                                try:
-                                    res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                    res_data = res.json()
+                                outdoor_text = ", + Outdoor" if o == "Yes" else ""
+                                fur_request_name = f"{t}, {p}{outdoor_text}"
+                                status_text.text(f"⚙️ Compiling {current_iter}/{total_iters}: {fur_request_name}...")
+                                
+                                # 2. Build Automated BOQ for this specific combination
+                                rooms_to_add = [
+                                    {"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code_letter)},
+                                    {"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code_letter)},
+                                    {"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code_letter)}
+                                ]
+                                if o == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code_letter)})
+                                if "+N" in t: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code_letter)})
+                                if "+F" in t: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code_letter)})
+                                
+                                num_beds = int(t[0])
+                                rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code_letter)})
+                                if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code_letter)})
+                                
+                                staged_items_payload = []
+                                for r in rooms_to_add:
+                                    staged_items_payload.append({
+                                        "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
+                                        "unit": "LS", "qty": r["qty"], "rate": r["rate"]
+                                    })
                                     
-                                    if res_data.get("status") == "success":
-                                        merger = PdfWriter()
-                                        merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
+                                if selected_request_type == "Furniture BULK":
+                                    if not has_pypdf:
+                                        st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
+                                        st.stop()
                                         
-                                        for room_b64 in res_data.get("roomBase64s", []):
-                                            try:
-                                                merger.append(io.BytesIO(base64.b64decode(room_b64)))
-                                            except Exception:
-                                                pass
+                                    payload = {
+                                        "action": "generateDocOnly",
+                                        "packageCode": payload_pkg_code,
+                                        "unitId": selected_unit,
+                                        "clientName": final_client_name,
+                                        "zone": str(zone_name),
+                                        "requestType": fur_request_name,
+                                        "items": staged_items_payload
+                                    }
+                                    
+                                    try:
+                                        res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                                        res_data = res.json()
+                                        
+                                        if res_data.get("status") == "success":
+                                            merger = PdfWriter()
+                                            merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
+                                            
+                                            for room_b64 in res_data.get("roomBase64s", []):
+                                                try:
+                                                    merger.append(io.BytesIO(base64.b64decode(room_b64)))
+                                                except Exception:
+                                                    pass
+                                                    
+                                            output_pdf = io.BytesIO()
+                                            merger.write(output_pdf)
+                                            
+                                            up_payload = {
+                                                "action": "uploadPdf",
+                                                "docName": res_data["docName"],
+                                                "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
+                                                "serialNumber": res_data["serialNumber"],
+                                                "unitId": selected_unit,
+                                                "clientName": final_client_name,
+                                                "requestType": fur_request_name,
+                                                "grandTotal": res_data["grandTotal"],
+                                                "zone": str(zone_name)
+                                            }
+                                            
+                                            up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
+                                            if up_res.json().get("status") == "success":
+                                                success_count += 1
                                                 
-                                        output_pdf = io.BytesIO()
-                                        merger.write(output_pdf)
+                                    except Exception as e:
+                                        st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
                                         
-                                        up_payload = {
-                                            "action": "uploadPdf",
-                                            "docName": res_data["docName"],
-                                            "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
-                                            "serialNumber": res_data["serialNumber"],
-                                            "unitId": selected_unit,
-                                            "clientName": final_client_name,
-                                            "requestType": fur_request_name,
-                                            "grandTotal": res_data["grandTotal"],
-                                            "zone": str(zone_name)
-                                        }
+                                else: # Standard Furniture Request (Failsafe logic, though this block only runs if selected_request_type == "Furniture BULK")
+                                    payload = {
+                                        "action": "standard",
+                                        "unitId": selected_unit,
+                                        "clientName": final_client_name,
+                                        "zone": str(zone_name),
+                                        "requestType": fur_request_name,
+                                        "items": staged_items_payload
+                                    }
+                                    
+                                    try:
+                                        res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                                        res_data = res.json()
                                         
-                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
-                                        if up_res.json().get("status") == "success":
+                                        if res_data.get("status") == "success":
                                             success_count += 1
                                             
-                                except Exception as e:
-                                    st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
+                                    except Exception as e:
+                                        st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
                                     
-                            else: # Standard Furniture Request
-                                payload = {
-                                    "action": "standard",
-                                    "unitId": selected_unit,
-                                    "clientName": final_client_name,
-                                    "zone": str(zone_name),
-                                    "requestType": fur_request_name,
-                                    "items": staged_items_payload
-                                }
+                                # Update Progress Bar and throttle to protect API limits
+                                progress_bar.progress(current_iter / total_iters)
+                                time.sleep(1) # Protects Google Workspace from Rate Limiting
                                 
-                                try:
-                                    res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                    res_data = res.json()
-                                    
-                                    if res_data.get("status") == "success":
-                                        success_count += 1
-                                        
-                                except Exception as e:
-                                    st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
-                                
-                            # Update Progress Bar and throttle to protect API limits
-                            progress_bar.progress(current_iter / total_iters)
-                            time.sleep(1) # Protects Google Workspace from Rate Limiting
-                            
-                # Final Completion Status
-                if success_count == total_iters:
-                    status_text.success(f"✅ SUCCESS! All {success_count} packages compiled and synced to Google Workspace.")
-                else:
-                    status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
+                    # Final Completion Status
+                    if success_count == total_iters:
+                        status_text.success(f"✅ SUCCESS! All {success_count} packages compiled and synced to Google Workspace.")
+                    else:
+                        status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
 
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
