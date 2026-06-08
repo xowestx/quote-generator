@@ -234,11 +234,10 @@ if df_fact is not None and not df_fact.empty:
         col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
-    elif selected_request_type in ["Furniture", "Furniture BULK"]:
-        st.markdown(f"### 🛋️ Furniture Package Generator ({selected_request_type})")
+    elif selected_request_type == "Furniture BULK":
+        st.markdown(f"### 🛋️ Furniture Package Generator (BULK Engine)")
         st.info("💡 **Rule Engine:** Select inputs below. The system automatically allocates rooms and applies Master/Kids split logic.")
-        if selected_request_type == "Furniture BULK":
-            st.warning("⚠️ **BULK Mode Active:** This request will merge individual room PDFs into the final quotation document.")
+        st.warning("⚠️ **BULK Mode Active:** This request will auto-allocate rooms and merge individual room PDFs into the final quotation document.")
         
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1: fur_unit_type = st.selectbox("Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
@@ -314,143 +313,195 @@ if df_fact is not None and not df_fact.empty:
             # ==========================================
             # 🚀 BULK EXPORT ENGINE (ALL 18 PACKAGES)
             # ==========================================
-            if selected_request_type == "Furniture BULK":
-                st.markdown("---")
-                st.markdown("### 🚀 Bulk Export Engine")
-                st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
+            st.markdown("---")
+            st.markdown("### 🚀 Bulk Export Engine")
+            st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
+            
+            if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary"):
                 
-                # Removed 'use_container_width=True' to make the button smaller and neater
-                if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary"):
-                    
-                    # Define iteration matrices
-                    typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
-                    packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
-                    outdoors = ["No"] # STRICTLY SET TO 'No' TO REDUCE TO 18 OPTIONS
-                    total_iters = len(typologies) * len(packages) * len(outdoors)
-                    
-                    # UI Feedback setup
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
-                    headers = {"Content-Type": "application/json"}
-                    success_count = 0
-                    current_iter = 0
-                    
-                    for t in typologies:
-                        for p in packages:
-                            for o in outdoors:
-                                current_iter += 1
+                typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
+                packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
+                outdoors = ["No"]
+                total_iters = len(typologies) * len(packages) * len(outdoors)
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
+                headers = {"Content-Type": "application/json"}
+                success_count = 0
+                current_iter = 0
+                
+                for t in typologies:
+                    for p in packages:
+                        for o in outdoors:
+                            current_iter += 1
+                            
+                            pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
+                            payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
+                            
+                            outdoor_text = ", + Outdoor" if o == "Yes" else ""
+                            fur_request_name = f"{t}, {p}{outdoor_text}"
+                            status_text.text(f"⚙️ Compiling {current_iter}/{total_iters}: {fur_request_name}...")
+                            
+                            rooms_to_add = [
+                                {"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code_letter)},
+                                {"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code_letter)},
+                                {"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code_letter)}
+                            ]
+                            if o == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code_letter)})
+                            if "+N" in t: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code_letter)})
+                            if "+F" in t: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code_letter)})
+                            
+                            num_beds = int(t[0])
+                            rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code_letter)})
+                            if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code_letter)})
+                            
+                            staged_items_payload = []
+                            for r in rooms_to_add:
+                                staged_items_payload.append({
+                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
+                                    "unit": "LS", "qty": r["qty"], "rate": r["rate"]
+                                })
                                 
-                                # 1. Resolve Package Codes & Variables
-                                pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
-                                payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
+                            if not has_pypdf:
+                                st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
+                                st.stop()
                                 
-                                outdoor_text = ", + Outdoor" if o == "Yes" else ""
-                                fur_request_name = f"{t}, {p}{outdoor_text}"
-                                status_text.text(f"⚙️ Compiling {current_iter}/{total_iters}: {fur_request_name}...")
+                            payload = {
+                                "action": "generateDocOnly",
+                                "packageCode": payload_pkg_code,
+                                "unitId": selected_unit,
+                                "clientName": final_client_name,
+                                "zone": str(zone_name),
+                                "requestType": fur_request_name,
+                                "items": staged_items_payload
+                            }
+                            
+                            try:
+                                res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                                res_data = res.json()
                                 
-                                # 2. Build Automated BOQ for this specific combination
-                                rooms_to_add = [
-                                    {"desc": "Reception", "qty": 1.0, "rate": get_fur_rate("RECEPTION", pkg_code_letter)},
-                                    {"desc": "Dining Room", "qty": 1.0, "rate": get_fur_rate("DINING", pkg_code_letter)},
-                                    {"desc": "Terrace", "qty": 1.0, "rate": get_fur_rate("TERRACE", pkg_code_letter)}
-                                ]
-                                if o == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": get_fur_rate("OUTDOORS", pkg_code_letter)})
-                                if "+N" in t: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": get_fur_rate("NANNY", pkg_code_letter)})
-                                if "+F" in t: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": get_fur_rate("LIVING", pkg_code_letter)})
-                                
-                                num_beds = int(t[0])
-                                rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": get_fur_rate("MASTER BEDROOM", pkg_code_letter)})
-                                if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": get_fur_rate("KIDS BEDROOM", pkg_code_letter)})
-                                
-                                staged_items_payload = []
-                                for r in rooms_to_add:
-                                    staged_items_payload.append({
-                                        "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
-                                        "unit": "LS", "qty": r["qty"], "rate": r["rate"]
-                                    })
+                                if res_data.get("status") == "success":
+                                    merger = PdfWriter()
+                                    merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
                                     
-                                if selected_request_type == "Furniture BULK":
-                                    if not has_pypdf:
-                                        st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
-                                        st.stop()
-                                        
-                                    payload = {
-                                        "action": "generateDocOnly",
-                                        "packageCode": payload_pkg_code,
+                                    for room_b64 in res_data.get("roomBase64s", []):
+                                        try:
+                                            merger.append(io.BytesIO(base64.b64decode(room_b64)))
+                                        except Exception:
+                                            pass
+                                            
+                                    output_pdf = io.BytesIO()
+                                    merger.write(output_pdf)
+                                    
+                                    up_payload = {
+                                        "action": "uploadPdf",
+                                        "docName": res_data["docName"],
+                                        "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
+                                        "serialNumber": res_data["serialNumber"],
                                         "unitId": selected_unit,
                                         "clientName": final_client_name,
-                                        "zone": str(zone_name),
                                         "requestType": fur_request_name,
-                                        "items": staged_items_payload
+                                        "grandTotal": res_data["grandTotal"],
+                                        "zone": str(zone_name)
                                     }
                                     
-                                    try:
-                                        res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                        res_data = res.json()
+                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
+                                    if up_res.json().get("status") == "success":
+                                        success_count += 1
                                         
-                                        if res_data.get("status") == "success":
-                                            merger = PdfWriter()
-                                            merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
-                                            
-                                            for room_b64 in res_data.get("roomBase64s", []):
-                                                try:
-                                                    merger.append(io.BytesIO(base64.b64decode(room_b64)))
-                                                except Exception:
-                                                    pass
-                                                    
-                                            output_pdf = io.BytesIO()
-                                            merger.write(output_pdf)
-                                            
-                                            up_payload = {
-                                                "action": "uploadPdf",
-                                                "docName": res_data["docName"],
-                                                "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
-                                                "serialNumber": res_data["serialNumber"],
-                                                "unitId": selected_unit,
-                                                "clientName": final_client_name,
-                                                "requestType": fur_request_name,
-                                                "grandTotal": res_data["grandTotal"],
-                                                "zone": str(zone_name)
-                                            }
-                                            
-                                            up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
-                                            if up_res.json().get("status") == "success":
-                                                success_count += 1
-                                                
-                                    except Exception as e:
-                                        st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
-                                        
-                                else: # Standard Furniture Request (Failsafe logic, though this block only runs if selected_request_type == "Furniture BULK")
-                                    payload = {
-                                        "action": "standard",
-                                        "unitId": selected_unit,
-                                        "clientName": final_client_name,
-                                        "zone": str(zone_name),
-                                        "requestType": fur_request_name,
-                                        "items": staged_items_payload
-                                    }
-                                    
-                                    try:
-                                        res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                        res_data = res.json()
-                                        
-                                        if res_data.get("status") == "success":
-                                            success_count += 1
-                                            
-                                    except Exception as e:
-                                        st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
-                                    
-                                # Update Progress Bar and throttle to protect API limits
-                                progress_bar.progress(current_iter / total_iters)
-                                time.sleep(1) # Protects Google Workspace from Rate Limiting
+                            except Exception as e:
+                                st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
                                 
-                    # Final Completion Status
-                    if success_count == total_iters:
-                        status_text.success(f"✅ SUCCESS! All {success_count} packages compiled and synced to Google Workspace.")
-                    else:
-                        status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
+                            progress_bar.progress(current_iter / total_iters)
+                            time.sleep(1) # Protects Google Workspace from Rate Limiting
+                            
+                # Final Completion Status
+                if success_count == total_iters:
+                    status_text.success(f"✅ SUCCESS! All {success_count} packages compiled and synced to Google Workspace.")
+                else:
+                    status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
+
+    elif selected_request_type == "Furniture":
+        st.markdown(f"### 🛋️ Furniture Package Generator (Custom Room-by-Room)")
+        st.info("💡 **Custom Mode:** Select your package, then add rooms manually below. Base rates are pulled exclusively from the 'O' option. Multipliers applied automatically: 1.0 (Luxury), 0.7 (Deluxe), 0.35 (Rent).")
+        st.warning("⚠️ **PDF Merging Active:** This request will merge individual room PDFs into the final quotation document.")
+        
+        fur_package = st.selectbox("Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+        
+        if 'custom_fur_data' not in st.session_state or st.session_state.get('last_type') != "Furniture":
+            initial_fur_data = [{'Room Type': 'Reception', 'QTY': 1.0}]
+            st.session_state.custom_fur_data = pd.DataFrame(initial_fur_data)
+            st.session_state.last_type = "Furniture"
+            
+        col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
+        with col_editor:
+            edited_fur_df = st.data_editor(
+                st.session_state.custom_fur_data, key="custom_fur_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
+                column_config={
+                    "Room Type": st.column_config.SelectboxColumn("Room Type", options=["Reception", "Living Room", "Dining Room", "Master Bedroom", "Kids Bedroom", "Nanny's Room", "Terrace", "Outdoors"], default="Reception"),
+                    "QTY": st.column_config.NumberColumn("QTY", min_value=1.0, default=1.0)
+                }
+            )
+            
+        st.session_state.custom_fur_data = edited_fur_df
+        
+        def get_base_fur_rate_option_o(room_name):
+            search_term = "NANNY" if "Nanny" in room_name else room_name.upper()
+            
+            # Fetch specifically using Option "O"
+            match = df_rates[
+                (df_rates.iloc[:,0].astype(str).str.upper().str.contains(search_term, na=False)) & 
+                (df_rates.iloc[:,2].astype(str).str.strip().str.upper() == "O")
+            ]
+            if not match.empty: 
+                return float(str(match.iloc[0, 1]).replace(',', '').replace('$', '').strip())
+            
+            # Fallbacks derived directly from provided 'O' options
+            fallbacks = {
+                "RECEPTION": 225193.10, "LIVING ROOM": 204958.27, "DINING ROOM": 201455.32,
+                "MASTER BEDROOM": 230736.11, "KIDS BEDROOM": 199236.18, "NANNY'S ROOM": 31914.96,
+                "TERRACE": 31262.77, "OUTDOORS": 49704.38
+            }
+            for fb_key, fb_val in fallbacks.items():
+                if search_term in fb_key:
+                    return fb_val
+            return 0.0
+
+        multiplier = 1.0 if "Luxury" in fur_package else 0.7 if "Deluxe" in fur_package else 0.35
+        
+        final_fur_rows = []
+        for idx, row in edited_fur_df.iterrows():
+            room = row.get("Room Type", "Reception")
+            qty = float(row.get("QTY", 1.0))
+            
+            base_rate = get_base_fur_rate_option_o(room)
+            
+            # Nanny room fixed, others use multiplier
+            actual_rate = base_rate if "Nanny" in room else base_rate * multiplier
+            total = qty * actual_rate
+            desc = f"Supply and install Furniture for {room} as per attached design."
+            
+            final_fur_rows.append({
+                'No.': idx + 1, 'Room Type': room, 'Description': desc, 'Unit': 'LS', 
+                'QTY': qty, 'Rate': actual_rate, 'Total Amount': total, 
+                'Lookup Name': f"Furniture Package, {fur_package}"
+            })
+            
+        final_df = pd.DataFrame(final_fur_rows)
+        with col_no: st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
+        with col_total: st.dataframe(final_df[['Unit', 'Rate', 'Total Amount']], hide_index=True, use_container_width=True, column_config={"Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"), "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")})
+
+        st.session_state.staged_items = final_fur_rows
+        
+        subtotal = final_df['Total Amount'].sum() if not final_df.empty else 0
+        vat = subtotal * 0.14
+        total_with_vat = subtotal + vat
+
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
@@ -591,7 +642,7 @@ if df_fact is not None and not df_fact.empty:
                                 "rate": item.get("Rate", 0.0)
                             })
                             
-                        if selected_request_type == "Furniture BULK":
+                        if selected_request_type in ["Furniture BULK", "Furniture"]:
                             if not has_pypdf:
                                 st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
                             else:
@@ -611,7 +662,7 @@ if df_fact is not None and not df_fact.empty:
                                 response_data = response.json()
                                 
                                 if response_data.get("status") == "success":
-                                    if selected_request_type == "Furniture BULK":
+                                    if selected_request_type in ["Furniture BULK", "Furniture"]:
                                         st.toast("Compiling Room Designs. This may take 10-15 seconds...")
                                         
                                         merger = PdfWriter()
