@@ -16,15 +16,27 @@ try:
 except ImportError:
     has_pypdf = False
 
-# Verified Room-by-Room Furniture Rate Mapping (No Outdoors)
+# Verified Room-by-Room Furniture Rate Mapping (As per Rates Tab Option "O")
 FURNITURE_RATES = {
-    "RECEPTION": {"L": 225193.10, "D": 157635.17, "R": 78817.59},
-    "LIVING ROOM": {"L": 204958.27, "D": 143470.79, "R": 71735.39},
-    "DINING ROOM": {"L": 245996.63, "D": 172197.64, "R": 86098.82},
-    "MASTER BEDROOM": {"L": 230736.11, "D": 161515.28, "R": 80757.64},
-    "KIDS BEDROOM": {"L": 199236.18, "D": 139465.33, "R": 69732.66},
-    "NANNY'S ROOM": {"L": 31914.96, "D": 31914.96, "R": 31914.96},
-    "TERRACE": {"L": 31262.77, "D": 12829.63, "R": 9803.42}
+    "RECEPTION - P1": 225193.10,
+    "RECEPTION - P2": 204637.62,
+    "RECEPTION - P3": 183530.38,
+    "LIVING ROOM - P1": 204958.27,
+    "LIVING ROOM - P2": 196108.33,
+    "LIVING ROOM - P3": 193405.19,
+    "DINING ROOM - P1": 201455.32,
+    "DINING ROOM - P2": 245996.63,
+    "MASTER BEDROOM - P1": 230736.11,
+    "MASTER BEDROOM - P2": 194754.34,
+    "MASTER BEDROOM - P3": 230557.03,
+    "KIDS BEDROOM - P1": 199236.18,
+    "KIDS BEDROOM - P2": 182723.31,
+    "NANNY'S ROOM": 31914.96,
+    "TERRACE - P1": 31262.77,
+    "TERRACE - P2": 12829.63,
+    "TERRACE - P3": 9803.42,
+    "OUTDOORS - P1": 49704.38,
+    "OUTDOORS - P2": 64153.21
 }
 
 # ==========================================
@@ -247,7 +259,7 @@ if df_fact is not None and not df_fact.empty:
 
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Room-by-Room Furniture Builder")
-        st.info("💡 **Interactive Design Builder:** Pre-populate standard layout rooms by typology or customize details item-by-item below.")
+        st.info("💡 **Unified System Workspace:** Select your Package Level (rates scale dynamically: Luxury = 100%, Deluxe = 70%, Rent = 35%). Load clean typology presets or append specific rooms exactly as they appear in your Rates Database.")
         
         # Ensure st.session_state.staged_items is formatted correctly as a list
         if 'staged_items' not in st.session_state or not isinstance(st.session_state.staged_items, list):
@@ -256,62 +268,64 @@ if df_fact is not None and not df_fact.empty:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             st.markdown("##### Option A: Quick Populate Typology Preset")
-            fur_unit_type = st.selectbox("Select Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
-            fur_package = st.selectbox("Select Furniture Package", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+            fur_package = st.selectbox("Select Furniture Package Tier", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
+            fur_unit_type = st.selectbox("Select Unit Typology Preset", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
             
-            if st.button("➕ Populate Rooms from Preset", use_container_width=True):
-                pkg_code = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
+            # Map selected package tier to multiplier factor
+            pkg_code_letter = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
+            multiplier = 1.0 if pkg_code_letter == "L" else 0.7 if pkg_code_letter == "D" else 0.35
+            
+            if st.button("➕ Populate Preset Rooms", use_container_width=True):
                 rooms_to_add = []
                 
-                rooms_to_add.append({"desc": "Reception", "qty": 1.0, "key": "RECEPTION"})
-                rooms_to_add.append({"desc": "Dining Room", "qty": 1.0, "key": "DINING ROOM"})
-                rooms_to_add.append({"desc": "Terrace", "qty": 1.0, "key": "TERRACE"})
+                # Setup specific room names directly matching structural rate mapping definitions
+                rooms_to_add.append({"desc": "Reception Room", "qty": 1.0, "key": "RECEPTION - P1"})
+                rooms_to_add.append({"desc": "Dining Room", "qty": 1.0, "key": "DINING ROOM - P2"})
+                rooms_to_add.append({"desc": "Terrace Area", "qty": 1.0, "key": "TERRACE - P1"})
                 
-                # Note: Outdoors is entirely removed from all presets and configurations based on structural requested updates.
                 if "+N" in fur_unit_type: 
                     rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "key": "NANNY'S ROOM"})
                 if "+F" in fur_unit_type: 
-                    rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "key": "LIVING ROOM"})
+                    rooms_to_add.append({"desc": "Living Room Area", "qty": 1.0, "key": "LIVING ROOM - P1"})
                     
                 num_beds = int(fur_unit_type[0])
-                rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "key": "MASTER BEDROOM"})
+                rooms_to_add.append({"desc": "Master Bedroom Area", "qty": 1.0, "key": "MASTER BEDROOM - P1"})
                 if num_beds > 1: 
-                    rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "key": "KIDS BEDROOM"})
+                    rooms_to_add.append({"desc": "Kids Bedroom Area", "qty": float(num_beds - 1), "key": "KIDS BEDROOM - P1"})
                     
                 fur_request_name = f"{fur_unit_type}, {fur_package}"
 
                 new_staged = []
                 for idx, r in enumerate(rooms_to_add):
-                    rate = FURNITURE_RATES[r["key"]][pkg_code]
-                    total = r["qty"] * rate
-                    full_desc = f"Supply and install Furniture for {r['desc']} as per attached design."
+                    base_rate = FURNITURE_RATES[r["key"]]
+                    scaled_rate = base_rate * multiplier
+                    total = r["qty"] * scaled_rate
+                    full_desc = f"Supply and install Furniture for {r['desc']} ({r['key']}) as per attached design."
                     new_staged.append({
                         'No.': idx + 1, 
                         'Description': full_desc, 
                         'Unit': 'LS', 
                         'QTY': r["qty"], 
-                        'Rate': rate,
+                        'Rate': scaled_rate,
                         'Total Amount': total, 
-                        'Lookup Name': fur_request_name
+                        'Lookup Name': fur_request_name,
+                        'Base Key': r["key"]
                     })
                 st.session_state.staged_items = new_staged
-                st.toast("Preset populated successfully! Adjust manually below as needed.")
+                st.toast("Typology preset rooms loaded successfully!")
 
         with col_f2:
-            st.markdown("##### Option B: Add Rooms One-by-One Manually")
-            add_room_key = st.selectbox("Select Room to Append", list(FURNITURE_RATES.keys()))
-            add_room_pkg = st.selectbox("Select Package for Room", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
-            add_room_qty = st.number_input("Enter QTY", min_value=1.0, max_value=10.0, value=1.0, step=1.0)
+            st.markdown("##### Option B: Append Specific Database Room (O Option)")
+            add_room_key = st.selectbox("Select Database Room Option", list(FURNITURE_RATES.keys()))
+            add_room_qty = st.number_input("Enter Quantity", min_value=1.0, max_value=10.0, value=1.0, step=1.0)
             
-            if st.button("➕ Append Selected Room", use_container_width=True):
-                pkg_code = "L" if "Luxury" in add_room_pkg else "D" if "Deluxe" in add_room_pkg else "R"
-                rate = FURNITURE_RATES[add_room_key][pkg_code]
-                total = add_room_qty * rate
+            if st.button("➕ Append Room Option", use_container_width=True):
+                base_rate = FURNITURE_RATES[add_room_key]
+                scaled_rate = base_rate * multiplier
+                total = add_room_qty * scaled_rate
                 
-                full_desc = f"Supply and install Furniture for {add_room_key.title()} as per attached design."
-                
-                # Assign default or match existing staged list lookup configuration
-                default_lookup = f"Custom Suite, {add_room_pkg}"
+                full_desc = f"Supply and install Furniture for {add_room_key} as per attached design."
+                default_lookup = f"Custom Suite, {fur_package}"
                 if st.session_state.staged_items:
                     default_lookup = st.session_state.staged_items[0].get('Lookup Name', default_lookup)
                 
@@ -321,15 +335,30 @@ if df_fact is not None and not df_fact.empty:
                     'Description': full_desc,
                     'Unit': 'LS',
                     'QTY': add_room_qty,
-                    'Rate': rate,
+                    'Rate': scaled_rate,
                     'Total Amount': total,
-                    'Lookup Name': default_lookup
+                    'Lookup Name': default_lookup,
+                    'Base Key': add_room_key
                 })
-                st.toast(f"Appended {add_room_key.title()} successfully!")
+                st.toast(f"Appended {add_room_key} successfully!")
 
+        # Dynamic Recalculation Loop: Syncs rates dynamically if user changes packages
         if st.session_state.staged_items:
-            st.markdown("### 📊 Active Furniture Quotation List")
-            summary_df = pd.DataFrame([{k: v for k, v in item.items() if k != 'Lookup Name'} for item in st.session_state.staged_items])
+            recalibrated_items = []
+            for idx, item in enumerate(st.session_state.staged_items):
+                base_key = item.get('Base Key')
+                if base_key in FURNITURE_RATES:
+                    orig_rate = FURNITURE_RATES[base_key]
+                    new_rate = orig_rate * multiplier
+                    item['Rate'] = new_rate
+                    item['Total Amount'] = item['QTY'] * new_rate
+                    item['Lookup Name'] = f"{fur_unit_type}, {fur_package}"
+                item['No.'] = idx + 1
+                recalibrated_items.append(item)
+            st.session_state.staged_items = recalibrated_items
+
+            st.markdown("### 📊 Active Unified Furniture Quotation List")
+            summary_df = pd.DataFrame([{k: v for k, v in item.items() if k != 'Lookup Name' and k != 'Base Key'} for item in st.session_state.staged_items])
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
             
             subtotal = summary_df['Total Amount'].sum()
@@ -342,8 +371,9 @@ if df_fact is not None and not df_fact.empty:
             
             col_actions = st.columns(2)
             with col_actions[0]:
-                if st.button("🗑️ Remove Last Item", use_container_width=True):
-                    st.session_state.staged_items.pop()
+                if st.button("🗑️ Remove Last Room Item", use_container_width=True):
+                    if len(st.session_state.staged_items) > 0:
+                        st.session_state.staged_items.pop()
                     st.rerun()
             with col_actions[1]:
                 if st.button("❌ Clear Furniture Configuration", type="secondary", use_container_width=True):
@@ -382,9 +412,10 @@ if df_fact is not None and not df_fact.empty:
                         for o in outdoors:
                             current_iter += 1
                             
-                            # 1. Resolve Package Codes & Variables
+                            # 1. Resolve Package Codes, Multipliers & Variables
                             pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
                             payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
+                            bulk_multiplier = 1.0 if pkg_code_letter == "L" else 0.7 if pkg_code_letter == "D" else 0.35
                             
                             outdoor_text = ", + Outdoor" if o == "Yes" else ""
                             fur_request_name = f"{t}, {p}{outdoor_text}"
@@ -392,23 +423,29 @@ if df_fact is not None and not df_fact.empty:
                             
                             # 2. Build Automated BOQ for this specific combination
                             rooms_to_add = [
-                                {"desc": "Reception", "qty": 1.0, "rate": FURNITURE_RATES["RECEPTION"][pkg_code_letter]},
-                                {"desc": "Dining Room", "qty": 1.0, "rate": FURNITURE_RATES["DINING ROOM"][pkg_code_letter]},
-                                {"desc": "Terrace", "qty": 1.0, "rate": FURNITURE_RATES["TERRACE"][pkg_code_letter]}
+                                {"desc": "Reception Room", "qty": 1.0, "key": "RECEPTION - P1"},
+                                {"desc": "Dining Room", "qty": 1.0, "key": "DINING ROOM - P2"},
+                                {"desc": "Terrace Area", "qty": 1.0, "key": "TERRACE - P1"}
                             ]
-                            if o == "Yes": rooms_to_add.append({"desc": "Outdoors", "qty": 1.0, "rate": FURNITURE_RATES["OUTDOORS"][pkg_code_letter]})
-                            if "+N" in t: rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "rate": FURNITURE_RATES["NANNY'S ROOM"][pkg_code_letter]})
-                            if "+F" in t: rooms_to_add.append({"desc": "Living Room", "qty": 1.0, "rate": FURNITURE_RATES["LIVING ROOM"][pkg_code_letter]})
+                            if "+N" in t: 
+                                rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "key": "NANNY'S ROOM"})
+                            if "+F" in t: 
+                                rooms_to_add.append({"desc": "Living Room Area", "qty": 1.0, "key": "LIVING ROOM - P1"})
                             
                             num_beds = int(t[0])
-                            rooms_to_add.append({"desc": "Master Bedroom", "qty": 1.0, "rate": FURNITURE_RATES["MASTER BEDROOM"][pkg_code_letter]})
-                            if num_beds > 1: rooms_to_add.append({"desc": "Kids Bedroom", "qty": float(num_beds - 1), "rate": FURNITURE_RATES["KIDS BEDROOM"][pkg_code_letter]})
+                            rooms_to_add.append({"desc": "Master Bedroom Area", "qty": 1.0, "key": "MASTER BEDROOM - P1"})
+                            if num_beds > 1: 
+                                rooms_to_add.append({"desc": "Kids Bedroom Area", "qty": float(num_beds - 1), "key": "KIDS BEDROOM - P1"})
                             
                             staged_items_payload = []
                             for r in rooms_to_add:
+                                base_rate = FURNITURE_RATES[r["key"]]
+                                scaled_rate = base_rate * bulk_multiplier
                                 staged_items_payload.append({
-                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
-                                    "unit": "LS", "qty": r["qty"], "rate": r["rate"]
+                                    "description": f"Supply and install Furniture for {r['desc']} ({r['key']}) as per attached design.",
+                                    "unit": "LS", 
+                                    "qty": r["qty"], 
+                                    "rate": scaled_rate
                                 })
                                 
                             # 3. Trigger Webhook (Doc Generation)
