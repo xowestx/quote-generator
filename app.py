@@ -375,6 +375,7 @@ if df_fact is not None and not df_fact.empty:
             
             # Sync edits and row deletions back to staged_items
             updated_items = []
+            edited_df = edited_df.reset_index(drop=True)
             for idx, row in edited_df.iterrows():
                 item = row.to_dict()
                 item['No.'] = len(updated_items) + 1
@@ -478,7 +479,7 @@ if df_fact is not None and not df_fact.empty:
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
-                                "requestType": fur_request_name,
+                                "requestType": "Furniture",
                                 "items": staged_items_payload
                             }
                             
@@ -508,7 +509,7 @@ if df_fact is not None and not df_fact.empty:
                                         "serialNumber": res_data["serialNumber"],
                                         "unitId": selected_unit,
                                         "clientName": final_client_name,
-                                        "requestType": fur_request_name,
+                                        "requestType": "Furniture",
                                         "grandTotal": res_data["grandTotal"],
                                         "zone": str(zone_name)
                                     }
@@ -657,7 +658,7 @@ if df_fact is not None and not df_fact.empty:
                             "unitId": selected_unit,
                             "clientName": final_client_name,
                             "zone": str(zone_name),
-                            "requestType": resolved_req_name, 
+                            "requestType": "Furniture" if selected_request_type == "Furniture" else resolved_req_name, 
                             "items": []
                         }
                         
@@ -725,7 +726,7 @@ if df_fact is not None and not df_fact.empty:
                                         "serialNumber": response_data["serialNumber"],
                                         "unitId": selected_unit,
                                         "clientName": final_client_name,
-                                        "requestType": resolved_req_name,
+                                        "requestType": "Furniture",
                                         "grandTotal": response_data["grandTotal"],
                                         "zone": str(zone_name)
                                     }
