@@ -6,6 +6,15 @@ import re
 import requests
 import json
 import time
+import base64
+import io
+
+# Import PDF Merger for the "Furniture BULK" advanced merging engine
+try:
+    from pypdf import PdfWriter
+    has_pypdf = True
+except ImportError:
+    has_pypdf = False
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
@@ -138,7 +147,7 @@ if df_fact is not None and not df_fact.empty:
     request_options = [
         "Roof Room", "Pool Standard", "Pool Customized", "Interior Standard Package", 
         "Interior Customized Package", "Interior Modification", "Kitchen", "Closets", 
-        "Landscape", "Furniture", "Closing Double Height", "Land Extension", 
+        "Landscape", "Furniture", "Furniture BULK", "Closing Double Height", "Land Extension", 
         "Exterior Painting", "Glass House", "Elevator", "A.C", "Shutters", 
         "Fence & Gates", "Pergola", "Landscape Modifications", "SOG", "Closing Elevator Shaft"
     ]
@@ -225,9 +234,11 @@ if df_fact is not None and not df_fact.empty:
         col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
-    elif selected_request_type == "Furniture":
-        st.markdown("### 🛋️ Furniture Package Generator")
+    elif selected_request_type in ["Furniture", "Furniture BULK"]:
+        st.markdown(f"### 🛋️ Furniture Package Generator ({selected_request_type})")
         st.info("💡 **Rule Engine:** Select inputs below. The system automatically allocates rooms and applies Master/Kids split logic.")
+        if selected_request_type == "Furniture BULK":
+            st.warning("⚠️ **BULK Mode Active:** This request will merge individual room PDFs into the final quotation document.")
         
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1: fur_unit_type = st.selectbox("Unit Typology", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
@@ -331,6 +342,7 @@ if df_fact is not None and not df_fact.empty:
                             
                             # 1. Resolve Package Codes & Variables
                             pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
+                            payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
                             
                             outdoor_text = ", + Outdoor" if o == "Yes" else ""
                             fur_request_name = f"{t}, {p}{outdoor_text}"
@@ -357,24 +369,76 @@ if df_fact is not None and not df_fact.empty:
                                     "unit": "LS", "qty": r["qty"], "rate": r["rate"]
                                 })
                                 
-                            # 3. Trigger Webhook (Doc Generation with Generic Standard Payload)
-                            payload = {
-                                "unitId": selected_unit,
-                                "clientName": final_client_name,
-                                "zone": str(zone_name),
-                                "requestType": fur_request_name,
-                                "items": staged_items_payload
-                            }
-                            
-                            try:
-                                res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                res_data = res.json()
-                                
-                                if res_data.get("status") == "success":
-                                    success_count += 1
+                            if selected_request_type == "Furniture BULK":
+                                if not has_pypdf:
+                                    st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
+                                    st.stop()
                                     
-                            except Exception as e:
-                                st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
+                                payload = {
+                                    "action": "generateDocOnly",
+                                    "packageCode": payload_pkg_code,
+                                    "unitId": selected_unit,
+                                    "clientName": final_client_name,
+                                    "zone": str(zone_name),
+                                    "requestType": fur_request_name,
+                                    "items": staged_items_payload
+                                }
+                                
+                                try:
+                                    res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                                    res_data = res.json()
+                                    
+                                    if res_data.get("status") == "success":
+                                        merger = PdfWriter()
+                                        merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
+                                        
+                                        for room_b64 in res_data.get("roomBase64s", []):
+                                            try:
+                                                merger.append(io.BytesIO(base64.b64decode(room_b64)))
+                                            except Exception:
+                                                pass
+                                                
+                                        output_pdf = io.BytesIO()
+                                        merger.write(output_pdf)
+                                        
+                                        up_payload = {
+                                            "action": "uploadPdf",
+                                            "docName": res_data["docName"],
+                                            "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
+                                            "serialNumber": res_data["serialNumber"],
+                                            "unitId": selected_unit,
+                                            "clientName": final_client_name,
+                                            "requestType": fur_request_name,
+                                            "grandTotal": res_data["grandTotal"],
+                                            "zone": str(zone_name)
+                                        }
+                                        
+                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
+                                        if up_res.json().get("status") == "success":
+                                            success_count += 1
+                                            
+                                except Exception as e:
+                                    st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
+                                    
+                            else: # Standard Furniture Request
+                                payload = {
+                                    "action": "standard",
+                                    "unitId": selected_unit,
+                                    "clientName": final_client_name,
+                                    "zone": str(zone_name),
+                                    "requestType": fur_request_name,
+                                    "items": staged_items_payload
+                                }
+                                
+                                try:
+                                    res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+                                    res_data = res.json()
+                                    
+                                    if res_data.get("status") == "success":
+                                        success_count += 1
+                                        
+                                except Exception as e:
+                                    st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
                                 
                             # Update Progress Bar and throttle to protect API limits
                             progress_bar.progress(current_iter / total_iters)
@@ -505,10 +569,11 @@ if df_fact is not None and not df_fact.empty:
                     with st.spinner("Transmitting to Google Workspace..."):
                         
                         resolved_req_name = selected_request_type
-                        if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                        if selected_request_type in ["Roof Room", "Furniture", "Furniture BULK"] and 'Lookup Name' in st.session_state.staged_items[0]:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
+                            "action": "standard",
                             "unitId": selected_unit,
                             "clientName": final_client_name,
                             "zone": str(zone_name),
@@ -524,6 +589,18 @@ if df_fact is not None and not df_fact.empty:
                                 "rate": item.get("Rate", 0.0)
                             })
                             
+                        if selected_request_type == "Furniture BULK":
+                            if not has_pypdf:
+                                st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
+                            else:
+                                payload["action"] = "generateDocOnly"
+                                fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
+                                if "[L]" in fur_package_name: pkg_code = "P1"
+                                elif "[D]" in fur_package_name: pkg_code = "P2"
+                                elif "[R]" in fur_package_name: pkg_code = "P3"
+                                else: pkg_code = "P1"
+                                payload["packageCode"] = pkg_code
+                            
                         try:
                             headers = {"Content-Type": "application/json"}
                             response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
@@ -532,10 +609,51 @@ if df_fact is not None and not df_fact.empty:
                                 response_data = response.json()
                                 
                                 if response_data.get("status") == "success":
-                                    st.success("✅ Quotation Generated Successfully!")
-                                    st.session_state.doc_url = response_data.get('docUrl')
-                                    st.session_state.pdf_url = response_data.get('pdfUrl')
-                                    st.rerun()
+                                    if selected_request_type == "Furniture BULK":
+                                        st.toast("Compiling Room Designs. This may take 10-15 seconds...")
+                                        
+                                        merger = PdfWriter()
+                                        
+                                        main_pdf_bytes = base64.b64decode(response_data["docBase64"])
+                                        merger.append(io.BytesIO(main_pdf_bytes))
+                                        
+                                        for room_b64 in response_data.get("roomBase64s", []):
+                                            room_bytes = base64.b64decode(room_b64)
+                                            try:
+                                                merger.append(io.BytesIO(room_bytes))
+                                            except Exception: pass
+                                            
+                                        output_pdf = io.BytesIO()
+                                        merger.write(output_pdf)
+                                        merged_bytes = output_pdf.getvalue()
+                                        
+                                        upload_payload = {
+                                            "action": "uploadPdf",
+                                            "docName": response_data["docName"],
+                                            "base64Pdf": base64.b64encode(merged_bytes).decode('utf-8'),
+                                            "serialNumber": response_data["serialNumber"],
+                                            "unitId": selected_unit,
+                                            "clientName": final_client_name,
+                                            "requestType": resolved_req_name,
+                                            "grandTotal": response_data["grandTotal"],
+                                            "zone": str(zone_name)
+                                        }
+                                        
+                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
+                                        up_data = up_res.json()
+                                        
+                                        if up_data.get("status") == "success":
+                                            st.success("✅ Quotation and Room Designs Compiled Successfully!")
+                                            st.session_state.doc_url = response_data['docUrl']
+                                            st.session_state.pdf_url = up_data['pdfUrl']
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to save final PDF: {up_data.get('message')}")
+                                    else:
+                                        st.success("✅ Quotation Generated Successfully!")
+                                        st.session_state.doc_url = response_data.get('docUrl')
+                                        st.session_state.pdf_url = response_data.get('pdfUrl')
+                                        st.rerun()
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
@@ -554,7 +672,7 @@ if df_fact is not None and not df_fact.empty:
                 pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
                 
                 disp_req_name = selected_request_type
-                if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                if selected_request_type in ["Roof Room", "Furniture", "Furniture BULK"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
                 pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
                 pdf.ln(8)
