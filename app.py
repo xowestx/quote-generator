@@ -309,23 +309,28 @@ if df_fact is not None and not df_fact.empty:
                         'Rate': scaled_rate,
                         'Total Amount': total, 
                         'Lookup Name': fur_request_name,
-                        'Base Key': r["key"]
+                        'Base Key': r["key"],
+                        'Multiplier': multiplier
                     })
                 st.session_state.staged_items = new_staged
                 st.toast("Typology preset rooms loaded successfully!")
 
         with col_f2:
             st.markdown("##### Option B: Append Specific Database Room (O Option)")
+            add_room_pkg = st.selectbox("Select Package Tier for this Room", ["Luxury [L]", "Deluxe [D]", "Rent [R]"], key="add_room_pkg")
             add_room_key = st.selectbox("Select Database Room Option", list(FURNITURE_RATES.keys()))
             add_room_qty = st.number_input("Enter Quantity", min_value=1.0, max_value=10.0, value=1.0, step=1.0)
             
             if st.button("➕ Append Room Option", use_container_width=True):
+                pkg_code_letter_b = "L" if "Luxury" in add_room_pkg else "D" if "Deluxe" in add_room_pkg else "R"
+                multiplier_b = 1.0 if pkg_code_letter_b == "L" else 0.7 if pkg_code_letter_b == "D" else 0.35
+                
                 base_rate = FURNITURE_RATES[add_room_key]
-                scaled_rate = base_rate * multiplier
+                scaled_rate = base_rate * multiplier_b
                 total = add_room_qty * scaled_rate
                 
                 full_desc = f"Supply and install Furniture for {add_room_key} as per attached design."
-                default_lookup = f"Custom Suite, {fur_package}"
+                default_lookup = f"Custom Suite, {add_room_pkg}"
                 if st.session_state.staged_items:
                     default_lookup = st.session_state.staged_items[0].get('Lookup Name', default_lookup)
                 
@@ -334,34 +339,59 @@ if df_fact is not None and not df_fact.empty:
                     'No.': next_no,
                     'Description': full_desc,
                     'Unit': 'LS',
-                    'QTY': add_room_qty,
+                    'QTY': float(add_room_qty),
                     'Rate': scaled_rate,
                     'Total Amount': total,
                     'Lookup Name': default_lookup,
-                    'Base Key': add_room_key
+                    'Base Key': add_room_key,
+                    'Multiplier': multiplier_b
                 })
-                st.toast(f"Appended {add_room_key} successfully!")
+                st.rerun()
 
-        # Dynamic Recalculation Loop: Syncs rates dynamically if user changes packages
         if st.session_state.staged_items:
-            recalibrated_items = []
-            for idx, item in enumerate(st.session_state.staged_items):
-                base_key = item.get('Base Key')
-                if base_key in FURNITURE_RATES:
-                    orig_rate = FURNITURE_RATES[base_key]
-                    new_rate = orig_rate * multiplier
-                    item['Rate'] = new_rate
-                    item['Total Amount'] = item['QTY'] * new_rate
-                    item['Lookup Name'] = f"{fur_unit_type}, {fur_package}"
-                item['No.'] = idx + 1
-                recalibrated_items.append(item)
-            st.session_state.staged_items = recalibrated_items
-
             st.markdown("### 📊 Active Unified Furniture Quotation List")
-            summary_df = pd.DataFrame([{k: v for k, v in item.items() if k != 'Lookup Name' and k != 'Base Key'} for item in st.session_state.staged_items])
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            st.info("💡 **Interactive Table:** Select any row and press **Delete** (or click the trash icon) to remove specific rooms. You can also edit the QTY directly!")
             
-            subtotal = summary_df['Total Amount'].sum()
+            df_staged = pd.DataFrame(st.session_state.staged_items)
+            
+            edited_df = st.data_editor(
+                df_staged,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key="furniture_editor",
+                column_config={
+                    "Lookup Name": None,
+                    "Base Key": None,
+                    "Multiplier": None,
+                    "No.": st.column_config.NumberColumn("No.", disabled=True),
+                    "Description": st.column_config.TextColumn("Description", disabled=True),
+                    "Unit": st.column_config.TextColumn("Unit", disabled=True),
+                    "QTY": st.column_config.NumberColumn("QTY", min_value=0.0),
+                    "Rate": st.column_config.NumberColumn("Rate", format="%.2f", disabled=True),
+                    "Total Amount": st.column_config.NumberColumn("Total", format="%.2f", disabled=True)
+                }
+            )
+            
+            # Sync edits and row deletions back to staged_items
+            updated_items = []
+            for idx, row in edited_df.iterrows():
+                item = row.to_dict()
+                item['No.'] = len(updated_items) + 1
+                
+                # Recalculate totals dynamically if user edits QTY inside the table
+                rate = float(item.get('Rate', 0.0))
+                qty = float(item.get('QTY', 1.0))
+                item['Total Amount'] = qty * rate
+                
+                updated_items.append(item)
+                
+            # Update session state if user changed QTY or deleted a row
+            if updated_items != st.session_state.staged_items:
+                st.session_state.staged_items = updated_items
+                st.rerun()
+            
+            subtotal = sum(item['Total Amount'] for item in st.session_state.staged_items)
             vat = subtotal * 0.14
             total_with_vat = subtotal + vat
 
@@ -369,16 +399,9 @@ if df_fact is not None and not df_fact.empty:
             col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
             col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
             
-            col_actions = st.columns(2)
-            with col_actions[0]:
-                if st.button("🗑️ Remove Last Room Item", use_container_width=True):
-                    if len(st.session_state.staged_items) > 0:
-                        st.session_state.staged_items.pop()
-                    st.rerun()
-            with col_actions[1]:
-                if st.button("❌ Clear Furniture Configuration", type="secondary", use_container_width=True):
-                    st.session_state.staged_items = []
-                    st.rerun()
+            if st.button("❌ Clear Furniture Configuration", type="secondary", use_container_width=True):
+                st.session_state.staged_items = []
+                st.rerun()
 
             # ==========================================
             # 🚀 BULK EXPORT ENGINE (ALL 18 PACKAGES)
