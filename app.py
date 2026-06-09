@@ -357,14 +357,14 @@ if df_fact is not None and not df_fact.empty:
                         'Rate': nanny_closet_rate, 'Total Amount': nanny_closet_rate, 'Lookup Name': fur_request_name, 'Base Key': "CLOSETS - NANNY", 'Multiplier': 1.0
                     })
                 
-                # ACs
+                # ACs UPDATED
                 new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp inverter Carrier AC split unit for Reception", 'Unit': 'NO.', 'QTY': 1.0,
-                    'Rate': 65000.00, 'Total Amount': 65000.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 3HP", 'Multiplier': 1.0
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp Carrier AC split unit for Reception, including freon piping required.", 'Unit': 'NO.', 'QTY': 1.0,
+                    'Rate': 60694.40, 'Total Amount': 60694.40, 'Lookup Name': fur_request_name, 'Base Key': "AC - 3HP", 'Multiplier': 1.0
                 })
                 new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp inverter Carrier AC split unit for Bedrooms", 'Unit': 'NO.', 'QTY': float(num_beds),
-                    'Rate': 45600.00, 'Total Amount': float(num_beds) * 45600.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 1.5HP", 'Multiplier': 1.0
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, including freon piping required.", 'Unit': 'NO.', 'QTY': float(num_beds),
+                    'Rate': 38772.20, 'Total Amount': float(num_beds) * 38772.20, 'Lookup Name': fur_request_name, 'Base Key': "AC - 1.5HP", 'Multiplier': 1.0
                 })
 
                 st.session_state.staged_items = new_staged
@@ -565,11 +565,12 @@ if df_fact is not None and not df_fact.empty:
                                     "description": nanny_closet_desc, "unit": "NO.", "qty": 1.0, "rate": 22500.00
                                 })
 
+                            # ACs UPDATED
                             staged_items_payload.append({
-                                "description": "Supply and install 3 hp inverter Carrier AC split unit for Reception", "unit": "NO.", "qty": 1.0, "rate": 65000.00
+                                "description": "Supply and install 3 hp Carrier AC split unit for Reception, including freon piping required.", "unit": "NO.", "qty": 1.0, "rate": 60694.40
                             })
                             staged_items_payload.append({
-                                "description": "Supply and install 1.5 hp inverter Carrier AC split unit for Bedrooms", "unit": "NO.", "qty": float(num_beds), "rate": 45600.00
+                                "description": "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, including freon piping required.", "unit": "NO.", "qty": float(num_beds), "rate": 38772.20
                             })
                                 
                             # 3. Trigger Webhook (Doc Generation) - Sending typology name as requestType to trigger Apps Script regex!
