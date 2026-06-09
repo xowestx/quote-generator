@@ -312,6 +312,43 @@ if df_fact is not None and not df_fact.empty:
                         'Base Key': r["key"],
                         'Multiplier': multiplier
                     })
+                    
+                # ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
+                # Kitchen
+                kitchen_desc = f"Required fees for supply and installing kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
+                kitchen_rate = 154350.00 if pkg_code_letter == 'L' else 120050.00 if pkg_code_letter == 'D' else 85750.00
+                new_staged.append({
+                    'No.': len(new_staged) + 1, 'Description': kitchen_desc, 'Unit': 'LS', 'QTY': 1.0,
+                    'Rate': kitchen_rate, 'Total Amount': kitchen_rate, 'Lookup Name': fur_request_name, 'Base Key': f"KITCHEN - {pkg_code_letter}", 'Multiplier': 1.0
+                })
+                
+                # Closets (2 for Master + 1 for each Kids bedroom = num_beds + 1)
+                if pkg_code_letter == 'L':
+                    closet_desc = "Supply and install a wardrobe constructed from 'Good Wood' blockboard with an HPL finish and pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                    closet_rate = 72800.00
+                elif pkg_code_letter == 'D':
+                    closet_desc = "Supply and install a wardrobe constructed from melamine-faced blockboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                    closet_rate = 72800.00 * 0.7
+                else:
+                    closet_desc = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                    closet_rate = 72800.00 * 0.5
+                
+                closet_qty = float(num_beds + 1)
+                new_staged.append({
+                    'No.': len(new_staged) + 1, 'Description': closet_desc, 'Unit': 'NO.', 'QTY': closet_qty,
+                    'Rate': closet_rate, 'Total Amount': closet_qty * closet_rate, 'Lookup Name': fur_request_name, 'Base Key': f"CLOSETS - {pkg_code_letter}", 'Multiplier': 1.0
+                })
+                
+                # ACs
+                new_staged.append({
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp inverter Carrier AC split unit", 'Unit': 'NO.', 'QTY': 1.0,
+                    'Rate': 65000.00, 'Total Amount': 65000.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 3HP", 'Multiplier': 1.0
+                })
+                new_staged.append({
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp inverter Carrier AC split unit", 'Unit': 'NO.', 'QTY': float(num_beds),
+                    'Rate': 45600.00, 'Total Amount': float(num_beds) * 45600.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 1.5HP", 'Multiplier': 1.0
+                })
+
                 st.session_state.staged_items = new_staged
                 st.toast("Typology preset rooms loaded successfully!")
 
@@ -471,6 +508,34 @@ if df_fact is not None and not df_fact.empty:
                                     "qty": r["qty"], 
                                     "rate": scaled_rate
                                 })
+                                
+                            # BULK ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
+                            kitchen_desc = f"Required fees for supply and installing kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
+                            kitchen_rate = 154350.00 if pkg_code_letter == 'L' else 120050.00 if pkg_code_letter == 'D' else 85750.00
+                            staged_items_payload.append({
+                                "description": kitchen_desc, "unit": "LS", "qty": 1.0, "rate": kitchen_rate
+                            })
+
+                            if pkg_code_letter == 'L':
+                                closet_desc = "Supply and install a wardrobe constructed from 'Good Wood' blockboard with an HPL finish and pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                                closet_rate = 72800.00
+                            elif pkg_code_letter == 'D':
+                                closet_desc = "Supply and install a wardrobe constructed from melamine-faced blockboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                                closet_rate = 72800.00 * 0.7
+                            else:
+                                closet_desc = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                                closet_rate = 72800.00 * 0.5
+                            
+                            staged_items_payload.append({
+                                "description": closet_desc, "unit": "NO.", "qty": float(num_beds + 1), "rate": closet_rate
+                            })
+
+                            staged_items_payload.append({
+                                "description": "Supply and install 3 hp inverter Carrier AC split unit", "unit": "NO.", "qty": 1.0, "rate": 65000.00
+                            })
+                            staged_items_payload.append({
+                                "description": "Supply and install 1.5 hp inverter Carrier AC split unit", "unit": "NO.", "qty": float(num_beds), "rate": 45600.00
+                            })
                                 
                             # 3. Trigger Webhook (Doc Generation)
                             payload = {
