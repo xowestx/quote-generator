@@ -300,7 +300,7 @@ if df_fact is not None and not df_fact.empty:
                     base_rate = FURNITURE_RATES[r["key"]]
                     scaled_rate = base_rate * multiplier
                     total = r["qty"] * scaled_rate
-                    full_desc = f"Supply and install Furniture for {r['desc']} ({r['key']}) as per attached design."
+                    full_desc = f"Supply and install Furniture for {r['desc']} as per attached design."
                     new_staged.append({
                         'No.': idx + 1, 
                         'Description': full_desc, 
@@ -341,11 +341,11 @@ if df_fact is not None and not df_fact.empty:
                 
                 # ACs
                 new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp inverter Carrier AC split unit", 'Unit': 'NO.', 'QTY': 1.0,
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp inverter Carrier AC split unit for Reception", 'Unit': 'NO.', 'QTY': 1.0,
                     'Rate': 65000.00, 'Total Amount': 65000.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 3HP", 'Multiplier': 1.0
                 })
                 new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp inverter Carrier AC split unit", 'Unit': 'NO.', 'QTY': float(num_beds),
+                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp inverter Carrier AC split unit for Bedrooms", 'Unit': 'NO.', 'QTY': float(num_beds),
                     'Rate': 45600.00, 'Total Amount': float(num_beds) * 45600.00, 'Lookup Name': fur_request_name, 'Base Key': "AC - 1.5HP", 'Multiplier': 1.0
                 })
 
@@ -366,7 +366,11 @@ if df_fact is not None and not df_fact.empty:
                 scaled_rate = base_rate * multiplier_b
                 total = add_room_qty * scaled_rate
                 
-                full_desc = f"Supply and install Furniture for {add_room_key} as per attached design."
+                clean_room_name = add_room_key.split(" - ")[0].title()
+                if "Nanny" in clean_room_name:
+                    clean_room_name = "Nanny's Room"
+                
+                full_desc = f"Supply and install Furniture for {clean_room_name} as per attached design."
                 default_lookup = f"Custom Suite, {add_room_pkg}"
                 if st.session_state.staged_items:
                     default_lookup = st.session_state.staged_items[0].get('Lookup Name', default_lookup)
@@ -449,10 +453,7 @@ if df_fact is not None and not df_fact.empty:
             st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
             
             if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary", use_container_width=True):
-                if not has_pypdf:
-                    st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
-                    st.stop()
-                    
+                
                 # Define iteration matrices
                 typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
                 packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
@@ -503,7 +504,7 @@ if df_fact is not None and not df_fact.empty:
                                 base_rate = FURNITURE_RATES[r["key"]]
                                 scaled_rate = base_rate * bulk_multiplier
                                 staged_items_payload.append({
-                                    "description": f"Supply and install Furniture for {r['desc']} ({r['key']}) as per attached design.",
+                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
                                     "unit": "LS", 
                                     "qty": r["qty"], 
                                     "rate": scaled_rate
@@ -531,16 +532,15 @@ if df_fact is not None and not df_fact.empty:
                             })
 
                             staged_items_payload.append({
-                                "description": "Supply and install 3 hp inverter Carrier AC split unit", "unit": "NO.", "qty": 1.0, "rate": 65000.00
+                                "description": "Supply and install 3 hp inverter Carrier AC split unit for Reception", "unit": "NO.", "qty": 1.0, "rate": 65000.00
                             })
                             staged_items_payload.append({
-                                "description": "Supply and install 1.5 hp inverter Carrier AC split unit", "unit": "NO.", "qty": float(num_beds), "rate": 45600.00
+                                "description": "Supply and install 1.5 hp inverter Carrier AC split unit for Bedrooms", "unit": "NO.", "qty": float(num_beds), "rate": 45600.00
                             })
                                 
                             # 3. Trigger Webhook (Doc Generation)
                             payload = {
-                                "action": "generateDocOnly",
-                                "packageCode": payload_pkg_code,
+                                "action": "standard",
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
@@ -553,35 +553,7 @@ if df_fact is not None and not df_fact.empty:
                                 res_data = res.json()
                                 
                                 if res_data.get("status") == "success":
-                                    # 4. PyPDF Merge inside memory
-                                    merger = PdfWriter()
-                                    merger.append(io.BytesIO(base64.b64decode(res_data["docBase64"])))
-                                    
-                                    for room_b64 in res_data.get("roomBase64s", []):
-                                        try:
-                                            merger.append(io.BytesIO(base64.b64decode(room_b64)))
-                                        except Exception:
-                                            pass
-                                            
-                                    output_pdf = io.BytesIO()
-                                    merger.write(output_pdf)
-                                    
-                                    # 5. Trigger Webhook (Upload Final Merged PDF)
-                                    up_payload = {
-                                        "action": "uploadPdf",
-                                        "docName": res_data["docName"],
-                                        "base64Pdf": base64.b64encode(output_pdf.getvalue()).decode('utf-8'),
-                                        "serialNumber": res_data["serialNumber"],
-                                        "unitId": selected_unit,
-                                        "clientName": final_client_name,
-                                        "requestType": "Furniture",
-                                        "grandTotal": res_data["grandTotal"],
-                                        "zone": str(zone_name)
-                                    }
-                                    
-                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
-                                    if up_res.json().get("status") == "success":
-                                        success_count += 1
+                                    success_count += 1
                                         
                             except Exception as e:
                                 st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
@@ -734,19 +706,6 @@ if df_fact is not None and not df_fact.empty:
                                 "qty": item.get("QTY", 1.0),
                                 "rate": item.get("Rate", 0.0)
                             })
-                            
-                        # Set up two-way PDF merger specifically for Furniture
-                        if selected_request_type == "Furniture":
-                            if not has_pypdf:
-                                st.error("🚨 Critical Error: You MUST add 'pypdf' to your GitHub requirements.txt file to combine Furniture PDFs!")
-                            else:
-                                payload["action"] = "generateDocOnly"
-                                fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
-                                if "[L]" in fur_package_name: pkg_code = "P1"
-                                elif "[D]" in fur_package_name: pkg_code = "P2"
-                                elif "[R]" in fur_package_name: pkg_code = "P3"
-                                else: pkg_code = "P1"
-                                payload["packageCode"] = pkg_code
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
@@ -756,56 +715,11 @@ if df_fact is not None and not df_fact.empty:
                                 response_data = response.json()
                                 
                                 # Process standard quote
-                                if response_data.get("status") == "success" and selected_request_type != "Furniture":
+                                if response_data.get("status") == "success":
                                     st.success("✅ Quotation Generated Successfully!")
                                     st.session_state.doc_url = response_data.get('docUrl')
                                     st.session_state.pdf_url = response_data.get('pdfUrl')
                                     st.rerun()
-                                    
-                                # Process advanced 2-way Furniture PDF merge
-                                elif response_data.get("status") == "success" and selected_request_type == "Furniture":
-                                    st.toast("Compiling Room Designs. This may take 10-15 seconds...")
-                                    
-                                    merger = PdfWriter()
-                                    
-                                    # Base64 decode main doc
-                                    main_pdf_bytes = base64.b64decode(response_data["docBase64"])
-                                    merger.append(io.BytesIO(main_pdf_bytes))
-                                    
-                                    # Base64 decode and append all room docs
-                                    for room_b64 in response_data.get("roomBase64s", []):
-                                        room_bytes = base64.b64decode(room_b64)
-                                        try:
-                                            merger.append(io.BytesIO(room_bytes))
-                                        except Exception: pass
-                                            
-                                    output_pdf = io.BytesIO()
-                                    merger.write(output_pdf)
-                                    merged_bytes = output_pdf.getvalue()
-                                    
-                                    # Upload final PDF back to Drive
-                                    upload_payload = {
-                                        "action": "uploadPdf",
-                                        "docName": response_data["docName"],
-                                        "base64Pdf": base64.b64encode(merged_bytes).decode('utf-8'),
-                                        "serialNumber": response_data["serialNumber"],
-                                        "unitId": selected_unit,
-                                        "clientName": final_client_name,
-                                        "requestType": "Furniture",
-                                        "grandTotal": response_data["grandTotal"],
-                                        "zone": str(zone_name)
-                                    }
-                                    
-                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
-                                    up_data = up_res.json()
-                                    
-                                    if up_data.get("status") == "success":
-                                        st.success("✅ Quotation and Room Designs Compiled Successfully!")
-                                        st.session_state.doc_url = response_data['docUrl']
-                                        st.session_state.pdf_url = up_data['pdfUrl']
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Failed to save final PDF: {up_data.get('message')}")
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
