@@ -545,6 +545,8 @@ if df_fact is not None and not df_fact.empty:
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
                                 "requestType": "Furniture",
+                                "packageCode": payload_pkg_code,
+                                "packageName": fur_request_name,
                                 "items": staged_items_payload
                             }
                             
@@ -706,6 +708,16 @@ if df_fact is not None and not df_fact.empty:
                                 "qty": item.get("QTY", 1.0),
                                 "rate": item.get("Rate", 0.0)
                             })
+                            
+                        # Add packageCode and packageName to the payload for single Furniture exports so it triggers the Furniture template
+                        if selected_request_type == "Furniture":
+                            fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
+                            if "[L]" in fur_package_name: pkg_code = "P1"
+                            elif "[D]" in fur_package_name: pkg_code = "P2"
+                            elif "[R]" in fur_package_name: pkg_code = "P3"
+                            else: pkg_code = "P1"
+                            payload["packageCode"] = pkg_code
+                            payload["packageName"] = fur_package_name
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
