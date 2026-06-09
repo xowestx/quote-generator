@@ -300,7 +300,8 @@ if df_fact is not None and not df_fact.empty:
                     base_rate = FURNITURE_RATES[r["key"]]
                     scaled_rate = base_rate * multiplier
                     total = r["qty"] * scaled_rate
-                    full_desc = f"Supply and install Furniture for {r['desc']} as per attached design."
+                    # ADDED NEW FURNITURE INCLUSIONS HERE
+                    full_desc = f"Supply and install Furniture for {r['desc']} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses."
                     new_staged.append({
                         'No.': idx + 1, 
                         'Description': full_desc, 
@@ -387,7 +388,8 @@ if df_fact is not None and not df_fact.empty:
                 if "Nanny" in clean_room_name:
                     clean_room_name = "Nanny's Room"
                 
-                full_desc = f"Supply and install Furniture for {clean_room_name} as per attached design."
+                # ADDED NEW FURNITURE INCLUSIONS HERE
+                full_desc = f"Supply and install Furniture for {clean_room_name} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses."
                 default_lookup = f"Custom Suite, {add_room_pkg}"
                 if st.session_state.staged_items:
                     default_lookup = st.session_state.staged_items[0].get('Lookup Name', default_lookup)
@@ -520,8 +522,9 @@ if df_fact is not None and not df_fact.empty:
                             for r in rooms_to_add:
                                 base_rate = FURNITURE_RATES[r["key"]]
                                 scaled_rate = base_rate * bulk_multiplier
+                                # ADDED NEW FURNITURE INCLUSIONS HERE
                                 staged_items_payload.append({
-                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design.",
+                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses.",
                                     "unit": "LS", 
                                     "qty": r["qty"], 
                                     "rate": scaled_rate
