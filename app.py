@@ -569,13 +569,13 @@ if df_fact is not None and not df_fact.empty:
                                 "description": "Supply and install 1.5 hp inverter Carrier AC split unit for Bedrooms", "unit": "NO.", "qty": float(num_beds), "rate": 45600.00
                             })
                                 
-                            # 3. Trigger Webhook (Doc Generation)
+                            # 3. Trigger Webhook (Doc Generation) - Sending typology name as requestType to trigger Apps Script regex!
                             payload = {
                                 "action": "generateDocOnly",
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
-                                "requestType": "Furniture",
+                                "requestType": fur_request_name,  # THIS FIXES THE TEMPLATE ISSUE
                                 "packageCode": payload_pkg_code,
                                 "packageName": fur_request_name,
                                 "items": staged_items_payload
@@ -594,7 +594,7 @@ if df_fact is not None and not df_fact.empty:
                                         "serialNumber": res_data["serialNumber"],
                                         "unitId": selected_unit,
                                         "clientName": final_client_name,
-                                        "requestType": "Furniture",
+                                        "requestType": fur_request_name,  # Matches above
                                         "grandTotal": res_data["grandTotal"],
                                         "zone": str(zone_name)
                                     }
@@ -743,7 +743,7 @@ if df_fact is not None and not df_fact.empty:
                             "unitId": selected_unit,
                             "clientName": final_client_name,
                             "zone": str(zone_name),
-                            "requestType": "Furniture" if selected_request_type == "Furniture" else resolved_req_name, 
+                            "requestType": resolved_req_name, # Passes the typology name instead of "Furniture"
                             "items": []
                         }
                         
@@ -789,7 +789,7 @@ if df_fact is not None and not df_fact.empty:
                                             "serialNumber": response_data["serialNumber"],
                                             "unitId": selected_unit,
                                             "clientName": final_client_name,
-                                            "requestType": "Furniture",
+                                            "requestType": resolved_req_name, # Updated to match Typology
                                             "grandTotal": response_data["grandTotal"],
                                             "zone": str(zone_name)
                                         }
