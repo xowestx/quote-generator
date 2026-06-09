@@ -571,7 +571,7 @@ if df_fact is not None and not df_fact.empty:
                                 
                             # 3. Trigger Webhook (Doc Generation)
                             payload = {
-                                "action": "standard",
+                                "action": "generateDocOnly",
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
@@ -586,7 +586,22 @@ if df_fact is not None and not df_fact.empty:
                                 res_data = res.json()
                                 
                                 if res_data.get("status") == "success":
-                                    success_count += 1
+                                    # Skip PDF Merging and upload directly back
+                                    up_payload = {
+                                        "action": "uploadPdf",
+                                        "docName": res_data["docName"],
+                                        "base64Pdf": res_data["docBase64"],
+                                        "serialNumber": res_data["serialNumber"],
+                                        "unitId": selected_unit,
+                                        "clientName": final_client_name,
+                                        "requestType": "Furniture",
+                                        "grandTotal": res_data["grandTotal"],
+                                        "zone": str(zone_name)
+                                    }
+                                    
+                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
+                                    if up_res.json().get("status") == "success":
+                                        success_count += 1
                                         
                             except Exception as e:
                                 st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
@@ -747,6 +762,7 @@ if df_fact is not None and not df_fact.empty:
                             elif "[D]" in fur_package_name: pkg_code = "P2"
                             elif "[R]" in fur_package_name: pkg_code = "P3"
                             else: pkg_code = "P1"
+                            payload["action"] = "generateDocOnly"
                             payload["packageCode"] = pkg_code
                             payload["packageName"] = fur_package_name
                                 
@@ -759,10 +775,35 @@ if df_fact is not None and not df_fact.empty:
                                 
                                 # Process standard quote
                                 if response_data.get("status") == "success":
-                                    st.success("✅ Quotation Generated Successfully!")
-                                    st.session_state.doc_url = response_data.get('docUrl')
-                                    st.session_state.pdf_url = response_data.get('pdfUrl')
-                                    st.rerun()
+                                    if selected_request_type != "Furniture":
+                                        st.success("✅ Quotation Generated Successfully!")
+                                        st.session_state.doc_url = response_data.get('docUrl')
+                                        st.session_state.pdf_url = response_data.get('pdfUrl')
+                                        st.rerun()
+                                    else:
+                                        # Furniture 2-step (No PDF merging)
+                                        upload_payload = {
+                                            "action": "uploadPdf",
+                                            "docName": response_data["docName"],
+                                            "base64Pdf": response_data["docBase64"],
+                                            "serialNumber": response_data["serialNumber"],
+                                            "unitId": selected_unit,
+                                            "clientName": final_client_name,
+                                            "requestType": "Furniture",
+                                            "grandTotal": response_data["grandTotal"],
+                                            "zone": str(zone_name)
+                                        }
+                                        
+                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
+                                        up_data = up_res.json()
+                                        
+                                        if up_data.get("status") == "success":
+                                            st.success("✅ Furniture Quotation Compiled Successfully!")
+                                            st.session_state.doc_url = response_data['docUrl']
+                                            st.session_state.pdf_url = up_data['pdfUrl']
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to save final PDF: {up_data.get('message')}")
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
