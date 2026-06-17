@@ -143,29 +143,42 @@ if df_fact is not None and not df_fact.empty:
         
     with col_u2:
         db_client_name = ""
-        target_unit_str = str(selected_unit).strip().upper()
         
-        if df_clients is not None and not df_clients.empty and c_name_col and c_unit_col:
-            # Clean the unit column to strictly match uppercase and stripped spaces
-            df_clients['__match_unit'] = df_clients[c_unit_col].astype(str).str.strip().str.upper()
-            match_row = df_clients[df_clients['__match_unit'] == target_unit_str]
+        if df_clients is not None and not df_clients.empty:
+            def super_clean(text):
+                t = str(text).strip()
+                if t.endswith('.0'): t = t[:-2]
+                return re.sub(r'[\s\-_/]+', '', t).upper()
+                
+            safe_selected_unit = super_clean(selected_unit)
             
-            if not match_row.empty:
-                raw_name = str(match_row.iloc[0][c_name_col]).strip()
-                if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
-                    db_client_name = raw_name
-            else:
-                # Absolute fallback: if Unit ID column was wrong, scan every column in the row!
-                found = False
-                for col in df_clients.columns:
-                    if col != '__match_unit':
-                        match_any = df_clients[df_clients[col].astype(str).str.strip().str.upper() == target_unit_str]
-                        if not match_any.empty:
-                            raw_name = str(match_any.iloc[0][c_name_col]).strip()
-                            if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
-                                db_client_name = raw_name
-                                found = True
+            # 3. Finding the "Name" Column
+            name_col_idx = 0
+            for i, col in enumerate(df_clients.columns):
+                if 'NAME' in str(col).upper() or 'CLIENT' in str(col).upper():
+                    name_col_idx = i
+                    break
+                    
+            # 4. Searching Row-by-Row
+            for row_idx in range(len(df_clients)):
+                row = df_clients.iloc[row_idx]
+                cleaned_cells = [super_clean(cell) for cell in row.values]
+                
+                if safe_selected_unit in cleaned_cells:
+                    raw_name = str(row.iloc[name_col_idx]).strip()
+                    
+                    # 5. The Failsafe (Edge Case Handling)
+                    # Check if it grabbed a bad value or the Unit ID by mistake
+                    if raw_name.upper() in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"] or super_clean(raw_name) == safe_selected_unit:
+                        for cell in row.values:
+                            cell_str = str(cell).strip()
+                            if cell_str.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"] and super_clean(cell_str) != safe_selected_unit:
+                                raw_name = cell_str
                                 break
+                                
+                    if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
+                        db_client_name = raw_name
+                    break
 
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name, autocomplete="off")
 
@@ -174,6 +187,7 @@ if df_fact is not None and not df_fact.empty:
     if df_fact is not None and not df_fact.empty:
         # Try direct match
         df_fact['__match_fact'] = df_fact[fact_unit_id_col].astype(str).str.strip().str.upper()
+        target_unit_str = str(selected_unit).strip().upper()
         unit_meta_df = df_fact[df_fact['__match_fact'] == target_unit_str]
         
         if not unit_meta_df.empty:
@@ -710,7 +724,6 @@ if df_fact is not None and not df_fact.empty:
         except: 
             base_rate = 0.0
             
-        # Add exactly 50,000 to the total base cost (Area * Rate in table) + 50,000
         calculated_line_item_total = (base_rate * cdh_qty) + 50000.0
         
         # Format the quantity to remove decimals if it's a whole number for the description
@@ -721,6 +734,7 @@ if df_fact is not None and not df_fact.empty:
         financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 24 months" if "24" in str(chosen_term_option) else f" - {chosen_term_option}"
         resolved_request_name = "Closing Double Height" + financing_name_suffix
         
+        # Storing as 1 LS, and the rate contains the full combined value
         st.session_state.staged_items = [{
             'No.': 1, 
             'Description': cdh_description, 
