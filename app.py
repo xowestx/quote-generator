@@ -180,6 +180,7 @@ if df_fact is not None and not df_fact.empty:
                         db_client_name = raw_name
                     break
 
+        # 6. Pushing to the UI
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name, autocomplete="off")
 
     # 4. Extract metadata from FACT Table SECOND
@@ -252,7 +253,7 @@ if df_fact is not None and not df_fact.empty:
             def match_project(prod_proj):
                 p = str(prod_proj).strip().upper()
                 if not p or p in ['NAN', 'NONE']: return False
-                # Check if product project is substring of unit project or vice versa (e.g., "Whyt 1" vs "Whyt")
+                # Check if product project is substring of unit project or vice versa
                 return p in unit_project or unit_project in p
                 
             mask = filtered_catalog[prod_project_col].apply(match_project)
