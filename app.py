@@ -142,7 +142,8 @@ if df_fact is not None and not df_fact.empty:
                     if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
                         db_client_name = raw_name
 
-        client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name)
+        # ADDED autocomplete="off" to stop the browser from showing history suggestions
+        client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name, autocomplete="off")
 
     # --- UPDATED DATA PARSING FOR NEW 'FACT' TAB COLUMNS ---
     unit_type = unit_meta.get('Unit Type', '')
