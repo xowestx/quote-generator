@@ -191,6 +191,7 @@ if df_fact is not None and not df_fact.empty:
             if not fuzzy_meta_df.empty:
                 unit_meta = fuzzy_meta_df.iloc[0]
 
+    unit_project = str(unit_meta.get('Project', '')).strip().upper()
     unit_type = unit_meta.get('Unit Type', '')
     unit_design_type = unit_meta.get('Design Type', '')
     unit_design_opt = unit_meta.get('Design Option', unit_meta.get('Design Options', ''))
@@ -224,12 +225,26 @@ if df_fact is not None and not df_fact.empty:
         prod_area_col = next((c for c in df_products.columns if 'AREA' in c.upper()), df_products.columns[5])
         desc_col_text = next((c for c in df_products.columns if 'DESCRIPTION' in c.upper()), df_products.columns[6])
         cat_col = next((c for c in df_products.columns if 'CATEGORY' in c.upper()), df_products.columns[1])
+        prod_project_col = next((c for c in df_products.columns if 'PROJECT' in c.upper()), None)
         
         target_unit_type = str(unit_type).strip().upper()
         target_design_type = str(unit_design_type).strip().upper()
         target_design_opt = str(unit_design_opt).strip().upper()
         
         filtered_catalog = df_products.copy()
+        
+        # New filtration layer: Filter by Project Match (Containment Check)
+        if prod_project_col and unit_project and unit_project not in ['NAN', 'NONE', '']:
+            def match_project(prod_proj):
+                p = str(prod_proj).strip().upper()
+                if not p or p in ['NAN', 'NONE']: return False
+                # Check if product project is substring of unit project or vice versa (e.g., "Whyt 1" vs "Whyt")
+                return p in unit_project or unit_project in p
+                
+            mask = filtered_catalog[prod_project_col].apply(match_project)
+            if mask.any(): 
+                filtered_catalog = filtered_catalog[mask]
+                
         prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
         design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
