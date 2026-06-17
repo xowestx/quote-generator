@@ -771,7 +771,7 @@ if df_fact is not None and not df_fact.empty:
         
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
             if selected_request_type == "Land Extension":
-                initial_data = [{'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.', 'Unit': 'M2', 'QTY': 0.0, 'Rate': 55000.0}]
+                initial_data = [{'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.', 'Unit': 'M2', 'QTY': 0.0, 'Rate': 65000.0}]
             elif selected_request_type == "Pergola":
                 initial_data = [{'Type': 'Musky', 'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.', 'Area / QTY (NO.)': 10.0, 'prev_Type': 'Musky'}]
             else:
