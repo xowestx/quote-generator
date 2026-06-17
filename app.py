@@ -121,51 +121,53 @@ if df_fact is not None and not df_fact.empty:
         
     with col_u2:
         def super_clean(text):
-            t = str(text)
-            # Prevent pure numeric unit IDs from failing matches due to pandas turning them into .0 floats
-            if t.endswith('.0'):
-                t = t[:-2]
+            t = str(text).strip()
+            if t.endswith('.0'): t = t[:-2]
             return re.sub(r'[\s\-_/]+', '', t).upper()
             
-        safe_selected_unit = super_clean(selected_unit)
+        safe_target = super_clean(selected_unit)
         db_client_name = ""
         
-        # Identify exact columns robustly
-        name_col = next((c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()), df_clients.columns[0] if not df_clients.empty else None)
-        client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), None)
-        
-        if not df_clients.empty and name_col:
-            found = False
-            # Method 1: Try Direct Column Match First (Fastest and most accurate)
-            if client_unit_col:
-                for idx, row in df_clients.iterrows():
-                    if super_clean(row[client_unit_col]) == safe_selected_unit:
-                        db_client_name = str(row[name_col]).strip()
-                        found = True
-                        break
+        if not df_clients.empty:
+            # Scan the entire dataframe to guarantee a match, bypassing any column header shifts
+            name_col_idx = 0
+            for i, c in enumerate(df_clients.columns):
+                if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper():
+                    name_col_idx = i
+                    break
+
+            found_name = ""
             
-            # Method 2: Row Scan Fallback (If columns are slightly misaligned)
-            if not found:
-                name_col_idx = df_clients.columns.get_loc(name_col)
-                for row_idx in range(len(df_clients)):
-                    row = df_clients.iloc[row_idx]
-                    cleaned_cells = [super_clean(cell) for cell in row]
+            for idx, row in df_clients.iterrows():
+                # Clean all cells in the row to look for the unit ID
+                cleaned_cells = [super_clean(val) for val in row.values]
+                
+                if safe_target in cleaned_cells:
+                    # Unit matched! Try to get the name from the expected column
+                    raw_val = str(row.iloc[name_col_idx]).strip()
                     
-                    if safe_selected_unit in cleaned_cells:
-                        raw_name = str(row.iloc[name_col_idx]).strip()
-                        # If the extracted name happens to be the unit ID, grab the next valid cell
-                        if super_clean(raw_name) == safe_selected_unit:
-                            for cell in row:
-                                if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
-                                    raw_name = str(cell).strip()
-                                    break
-                        db_client_name = raw_name
-                        break
-        
-        # Prevent pandas "nan" from passing through into the UI
-        if db_client_name.upper() in ['NAN', 'NONE']:
-            db_client_name = ""
-            
+                    # Strict validation to eliminate '0.0', 'nan', or the Unit ID itself
+                    def is_invalid(x):
+                        sx = str(x).strip().upper()
+                        if sx in ['', 'NAN', 'NONE', 'NULL', '0.0', '0']: return True
+                        if super_clean(sx) == safe_target: return True
+                        return False
+                    
+                    if is_invalid(raw_val):
+                        # Scan other columns in the row for the actual name
+                        for val in row.values:
+                            if not is_invalid(val):
+                                raw_val = str(val).strip()
+                                break
+                    
+                    if not is_invalid(raw_val):
+                        found_name = raw_val
+                        
+                    break
+                    
+            if found_name:
+                db_client_name = found_name
+                
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name)
 
     # --- UPDATED DATA PARSING FOR NEW 'FACT' TAB COLUMNS ---
