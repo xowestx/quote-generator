@@ -106,17 +106,13 @@ if st.session_state.staged_items and 'Calculated_Price' in st.session_state.stag
 if df_fact is not None and not df_fact.empty:
     
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
-    client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_clients.columns[-1] if not df_clients.empty else None)
     
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        if client_unit_col:
-            valid_units = [u for u in df_clients[client_unit_col].unique() if str(u).strip() and str(u).strip().upper() not in ['NAN', 'NONE']]
-        else:
-            valid_units = df_fact[fact_unit_id_col].unique()
-        
+        # Enforce valid units to ALWAYS pull from the FACT table to guarantee exact string matching
+        valid_units = [u for u in df_fact[fact_unit_id_col].unique() if str(u).strip() and str(u).strip().upper() not in ['NAN', 'NONE']]
         valid_units = sorted(list(set(valid_units)), key=lambda x: str(x))
         selected_unit = st.selectbox("Select Unit ID", valid_units)
         
@@ -125,30 +121,51 @@ if df_fact is not None and not df_fact.empty:
         
     with col_u2:
         def super_clean(text):
-            return re.sub(r'[\s\-_/]+', '', str(text)).upper()
+            t = str(text)
+            # Prevent pure numeric unit IDs from failing matches due to pandas turning them into .0 floats
+            if t.endswith('.0'):
+                t = t[:-2]
+            return re.sub(r'[\s\-_/]+', '', t).upper()
             
         safe_selected_unit = super_clean(selected_unit)
         db_client_name = ""
         
-        name_col_idx = 0 
-        for i, col in enumerate(df_clients.columns):
-            if 'NAME' in str(col).upper() or 'CLIENT' in str(col).upper():
-                name_col_idx = i
-                break
-                
-        for row_idx in range(len(df_clients)):
-            row = df_clients.iloc[row_idx]
-            cleaned_cells = [super_clean(cell) for cell in row]
-            if safe_selected_unit in cleaned_cells:
-                raw_name = row.iloc[name_col_idx]
-                if super_clean(raw_name) == safe_selected_unit:
-                    for cell in row:
-                        if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
-                            raw_name = cell
-                            break
-                db_client_name = str(raw_name).strip()
-                break
+        # Identify exact columns robustly
+        name_col = next((c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()), df_clients.columns[0] if not df_clients.empty else None)
+        client_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), None)
+        
+        if not df_clients.empty and name_col:
+            found = False
+            # Method 1: Try Direct Column Match First (Fastest and most accurate)
+            if client_unit_col:
+                for idx, row in df_clients.iterrows():
+                    if super_clean(row[client_unit_col]) == safe_selected_unit:
+                        db_client_name = str(row[name_col]).strip()
+                        found = True
+                        break
+            
+            # Method 2: Row Scan Fallback (If columns are slightly misaligned)
+            if not found:
+                name_col_idx = df_clients.columns.get_loc(name_col)
+                for row_idx in range(len(df_clients)):
+                    row = df_clients.iloc[row_idx]
+                    cleaned_cells = [super_clean(cell) for cell in row]
                     
+                    if safe_selected_unit in cleaned_cells:
+                        raw_name = str(row.iloc[name_col_idx]).strip()
+                        # If the extracted name happens to be the unit ID, grab the next valid cell
+                        if super_clean(raw_name) == safe_selected_unit:
+                            for cell in row:
+                                if super_clean(cell) != safe_selected_unit and str(cell).strip() not in ['', 'NAN', 'NONE']:
+                                    raw_name = str(cell).strip()
+                                    break
+                        db_client_name = raw_name
+                        break
+        
+        # Prevent pandas "nan" from passing through into the UI
+        if db_client_name.upper() in ['NAN', 'NONE']:
+            db_client_name = ""
+            
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name)
 
     # --- UPDATED DATA PARSING FOR NEW 'FACT' TAB COLUMNS ---
