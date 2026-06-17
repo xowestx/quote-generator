@@ -109,25 +109,25 @@ if st.session_state.staged_items and 'Calculated_Price' in st.session_state.stag
 
 if df_fact is not None and not df_fact.empty:
     
-    # 1. Identify columns in both FACT and CLIENT NAME tables
+    # 1. Identify columns in both FACT and CLIENT NAME tables robustly
     fact_unit_id_col = next((c for c in df_fact.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), df_fact.columns[0])
     
     c_unit_col = None
     c_name_col = None
     
     if df_clients is not None and not df_clients.empty:
-        c_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), None)
-        c_name_col = next((c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()), None)
+        u_cols = [c for c in df_clients.columns if 'UNIT' in str(c).upper()]
+        n_cols = [c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()]
         
-        # Safe Fallback if headers are weird
-        if not c_unit_col and len(df_clients.columns) >= 3: c_unit_col = df_clients.columns[2]
-        if not c_name_col and len(df_clients.columns) >= 1: c_name_col = df_clients.columns[0]
+        # Fallbacks if columns are unnamed or weird
+        c_unit_col = u_cols[0] if u_cols else (df_clients.columns[2] if len(df_clients.columns) >= 3 else None)
+        c_name_col = n_cols[0] if n_cols else (df_clients.columns[0] if len(df_clients.columns) >= 1 else None)
 
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
     
     with col_u1:
-        # 2. Build the Valid Units Dropdown by checking BOTH tables, prioritizing the CLIENT NAME table
+        # Build the Valid Units Dropdown by combining BOTH tables
         valid_units_client = []
         if c_unit_col is not None and c_unit_col in df_clients.columns:
             valid_units_client = [str(u).strip() for u in df_clients[c_unit_col].unique() if str(u).strip() and str(u).strip().upper() not in ['NAN', 'NONE', '0.0', '0']]
@@ -142,28 +142,38 @@ if df_fact is not None and not df_fact.empty:
         selected_unit = st.selectbox("Select Unit ID", valid_units)
         
     with col_u2:
-        # 3. Read Client Name FIRST using an exact 1:1 match
         db_client_name = ""
-        target_unit_str = str(selected_unit).strip()
+        target_unit_str = str(selected_unit).strip().upper()
         
         if df_clients is not None and not df_clients.empty and c_name_col and c_unit_col:
-            # Cleanly match the selected unit string to the unit string in the Client sheet
-            df_clients['__match_unit'] = df_clients[c_unit_col].astype(str).str.strip()
+            # Clean the unit column to strictly match uppercase and stripped spaces
+            df_clients['__match_unit'] = df_clients[c_unit_col].astype(str).str.strip().str.upper()
             match_row = df_clients[df_clients['__match_unit'] == target_unit_str]
             
             if not match_row.empty:
                 raw_name = str(match_row.iloc[0][c_name_col]).strip()
-                # Verify we didn't just grab a dummy artifact
                 if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
                     db_client_name = raw_name
-        
+            else:
+                # Absolute fallback: if Unit ID column was wrong, scan every column in the row!
+                found = False
+                for col in df_clients.columns:
+                    if col != '__match_unit':
+                        match_any = df_clients[df_clients[col].astype(str).str.strip().str.upper() == target_unit_str]
+                        if not match_any.empty:
+                            raw_name = str(match_any.iloc[0][c_name_col]).strip()
+                            if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
+                                db_client_name = raw_name
+                                found = True
+                                break
+
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name, autocomplete="off")
 
     # 4. Extract metadata from FACT Table SECOND
     unit_meta = {}
     if df_fact is not None and not df_fact.empty:
         # Try direct match
-        df_fact['__match_fact'] = df_fact[fact_unit_id_col].astype(str).str.strip()
+        df_fact['__match_fact'] = df_fact[fact_unit_id_col].astype(str).str.strip().str.upper()
         unit_meta_df = df_fact[df_fact['__match_fact'] == target_unit_str]
         
         if not unit_meta_df.empty:
