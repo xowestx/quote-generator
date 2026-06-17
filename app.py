@@ -151,10 +151,13 @@ if df_fact is not None and not df_fact.empty:
                     
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name)
 
+    # --- UPDATED DATA PARSING FOR NEW 'FACT' TAB COLUMNS ---
     unit_type = unit_meta.get('Unit Type', '')
     unit_design_type = unit_meta.get('Design Type', '')
-    unit_design_opt = unit_meta.get('Design Options', '')
-    unit_bua = unit_meta.get('Built Up Area', 0)
+    # Checks for "Design Option" first, falls back to "Design Options"
+    unit_design_opt = unit_meta.get('Design Option', unit_meta.get('Design Options', ''))
+    # Checks for "Built up area" first, falls back to "Built Up Area"
+    unit_bua = unit_meta.get('Built up area', unit_meta.get('Built Up Area', 0))
     zone_name = unit_meta.get('Zone', 'Unknown Zone')
     
     m1, m2, m3, m4 = st.columns(4)
