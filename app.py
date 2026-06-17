@@ -675,6 +675,74 @@ if df_fact is not None and not df_fact.empty:
                 else:
                     status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
 
+    elif selected_request_type == "Closing Double Height":
+        st.markdown("### 🏗️ Closing Double Height Configuration")
+        
+        # Identify columns dynamically
+        rate_cat_col = df_rates.columns[0]
+        rate_val_col = df_rates.columns[1]
+        rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
+        
+        # Filter for Closing Double Height options
+        category_rates = df_rates[df_rates[rate_cat_col].astype(str).str.upper() == "CLOSING DOUBLE HEIGHT"]
+        
+        # Provide a fallback just in case the rates tab doesn't match perfectly
+        if category_rates.empty:
+            st.warning("Rates for 'Closing Double Height' not found. Using system defaults.")
+            category_rates = pd.DataFrame({
+                rate_cat_col: ["Closing Double Height", "Closing Double Height"],
+                rate_val_col: [61052.63, 67631.58],
+                rate_opt_col: ["6 months installment", "24 months installment"]
+            })
+            
+        col_cdh1, col_cdh2 = st.columns(2)
+        with col_cdh1:
+            cdh_qty = st.number_input("Enter Area (SQM)", min_value=1.0, max_value=500.0, value=10.0, step=1.0)
+        with col_cdh2:
+            chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
+            
+        # Get specific record
+        rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
+        
+        try:
+            rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
+            base_rate = float(rate_val)
+        except: 
+            base_rate = 0.0
+            
+        # Add exactly 50,000 to the base unit rate as requested
+        final_rate = base_rate + 50000.0
+        calculated_line_item_total = final_rate * cdh_qty
+        
+        cdh_description = "Required fees for Supply and install reinforced concrete slab for closing double height as per drawings."
+        
+        # Manage suffix to display on generated docs properly
+        financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 24 months" if "24" in str(chosen_term_option) else f" - {chosen_term_option}"
+        resolved_request_name = "Closing Double Height" + financing_name_suffix
+        
+        st.session_state.staged_items = [{
+            'No.': 1, 
+            'Description': cdh_description, 
+            'Unit': 'SQM', 
+            'QTY': float(cdh_qty), 
+            'Rate': final_rate, 
+            'Total Amount': calculated_line_item_total,
+            'Financing Options': chosen_term_option, 
+            'Lookup Name': resolved_request_name
+        }]
+        
+        st.markdown("### 📊 Generated BOQ Summary")
+        summary_df = pd.DataFrame([{k: v for k, v in st.session_state.staged_items[0].items() if k not in ['Financing Options', 'Lookup Name']}])
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        
+        subtotal = calculated_line_item_total
+        vat = subtotal * 0.14
+        total_with_vat = subtotal + vat
+
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
         st.info("💡 **Tip:** Type smoothly in the center! The read-only previews calculate No., Unit, Rate, and Total instantly.")
@@ -794,7 +862,7 @@ if df_fact is not None and not df_fact.empty:
                     with st.spinner("Transmitting to Google Workspace..."):
                         
                         resolved_req_name = selected_request_type
-                        if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                        if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
@@ -881,7 +949,7 @@ if df_fact is not None and not df_fact.empty:
                 pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
                 
                 disp_req_name = selected_request_type
-                if selected_request_type in ["Roof Room", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
                 pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
                 pdf.ln(8)
@@ -917,7 +985,7 @@ if df_fact is not None and not df_fact.empty:
                     pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
                 pdf.ln(4)
                 
-                if 'Financing Options' in st.session_state.staged_items[0] and selected_request_type == "Roof Room":
+                if 'Financing Options' in st.session_state.staged_items[0] and selected_request_type in ["Roof Room", "Closing Double Height"]:
                     pdf.set_font("Helvetica", "B", 11)
                     pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
                     pdf.set_font("Helvetica", "", 8)
@@ -926,7 +994,7 @@ if df_fact is not None and not df_fact.empty:
                     terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
                     
                     rule_term = st.session_state.staged_items[0].get('Financing Options')
-                    lookup_request_name = st.session_state.staged_items[0].get('Lookup Name', 'Roof Room')
+                    lookup_request_name = st.session_state.staged_items[0].get('Lookup Name', selected_request_type)
                     
                     matched_legal_text_blocks = df_terms[
                         (df_terms[terms_opt_col] == rule_term) & 
