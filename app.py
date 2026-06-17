@@ -216,14 +216,46 @@ if df_fact is not None and not df_fact.empty:
     unit_type = unit_meta.get('Unit Type', '')
     unit_design_type = unit_meta.get('Design Type', '')
     unit_design_opt = unit_meta.get('Design Option', unit_meta.get('Design Options', ''))
-    unit_bua = unit_meta.get('Built up area', unit_meta.get('Built Up Area', 0))
     zone_name = unit_meta.get('Zone', 'Unknown Zone')
     
-    m1, m2, m3, m4 = st.columns(4)
+    # Extract extra physical attributes from FACT tab
+    unit_bua = unit_meta.get('Built up area', unit_meta.get('Built Up Area', 0))
+    land_area = unit_meta.get('Land Area', 0)
+    bedrooms = unit_meta.get('No. Of Bedrooms', unit_meta.get('Bedrooms', 0))
+    bathrooms = unit_meta.get('No. of Bathrooms', unit_meta.get('Bathrooms', 0))
+    floors = unit_meta.get('No. of Floors', unit_meta.get('Floors', 0))
+    footprint = unit_meta.get('Foot Print', unit_meta.get('Footprint', 0))
+
+    # Clean formatting functions to handle zero values and floats properly
+    def fmt_val(val, is_qty=False):
+        try:
+            v = float(val)
+            if v == 0: return "N/A"
+            return str(int(v)) if is_qty or v.is_integer() else f"{v:.2f}"
+        except:
+            s = str(val).strip()
+            return s if s and s.upper() not in ["0", "NAN", "NONE"] else "N/A"
+
+    def fmt_sqm(val):
+        res = fmt_val(val)
+        return f"{res} sqm" if res != "N/A" else "N/A"
+    
+    # Render First Row
+    m1, m2, m3 = st.columns(3)
     m1.metric("Unit Profile", str(unit_type) if unit_type else "N/A")
     m2.metric("Native Design Options", str(unit_design_opt) if unit_design_opt else "N/A")
     m3.metric("Native Design Type", str(unit_design_type) if unit_design_type else "N/A")
-    m4.metric("Built Up Area (BUA)", f"{unit_bua} sqm")
+    
+    st.write("") # Spacer for clean UI
+    
+    # Render Second Row (New Data)
+    m4, m5, m6, m7, m8, m9 = st.columns(6)
+    m4.metric("Land Area", fmt_sqm(land_area))
+    m5.metric("Built Up Area", fmt_sqm(unit_bua))
+    m6.metric("Bedrooms", fmt_val(bedrooms, is_qty=True))
+    m7.metric("Bathrooms", fmt_val(bathrooms, is_qty=True))
+    m8.metric("Floors", fmt_val(floors, is_qty=True))
+    m9.metric("Foot Print", fmt_sqm(footprint))
     
     st.divider()
 
