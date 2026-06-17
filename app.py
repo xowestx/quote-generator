@@ -59,22 +59,29 @@ def load_all_tabs(base_url):
         rates = get_csv("RATES")
         terms = get_csv("TERMS_%26_CONDITIONS")
         
-        # Robust fetch for CLIENT NAME to bypass any URL encoding or tab space issues
-        try:
-            clients = get_csv("CLIENT_NAME")
-            if len(clients.columns) < 2 or not any('NAME' in str(c).upper() or 'CLIENT' in str(c).upper() for c in clients.columns):
-                clients = get_csv("CLIENT%20NAME")
-        except Exception:
-            clients = get_csv("CLIENT%20NAME")
+        # Robust fetch for CLIENT NAME: prevents grabbing FACT tab by default if tab name has encoding issues
+        clients = pd.DataFrame()
+        for sheet_guess in ["CLIENT%20NAME", "CLIENT_NAME", "Client%20Name"]:
+            try:
+                temp_df = get_csv(sheet_guess)
+                if not temp_df.empty:
+                    header_str = " ".join([str(c).upper() for c in temp_df.columns])
+                    # Verify it's actually the Client Name tab and not a default fallback tab
+                    if ('CLIENT' in header_str or 'NAME' in header_str) and 'UNIT' in header_str:
+                        clients = temp_df
+                        break
+            except Exception:
+                continue
         
         for df in [facts, products, rates, clients, terms]:
-            df.columns = [str(c).strip() for c in df.columns]
-            num_cols = df.select_dtypes(include=['number']).columns
-            df[num_cols] = df[num_cols].fillna(0)
-            obj_cols = df.select_dtypes(exclude=['number']).columns
-            df[obj_cols] = df[obj_cols].fillna('')
-            for col in df.select_dtypes(include=['object']).columns:
-                df[col] = df[col].astype(str).str.strip()
+            if df is not None and not df.empty:
+                df.columns = [str(c).strip() for c in df.columns]
+                num_cols = df.select_dtypes(include=['number']).columns
+                df[num_cols] = df[num_cols].fillna(0)
+                obj_cols = df.select_dtypes(exclude=['number']).columns
+                df[obj_cols] = df[obj_cols].fillna('')
+                for col in df.select_dtypes(include=['object']).columns:
+                    df[col] = df[col].astype(str).str.strip()
                 
         return facts, products, rates, clients, terms
     except Exception as e:
@@ -116,12 +123,13 @@ if df_fact is not None and not df_fact.empty:
     c_name_col = None
     
     if df_clients is not None and not df_clients.empty:
-        u_cols = [c for c in df_clients.columns if 'UNIT' in str(c).upper()]
-        n_cols = [c for c in df_clients.columns if 'NAME' in str(c).upper() or 'CLIENT' in str(c).upper()]
-        
-        # Fallbacks if columns are unnamed or weird
-        c_unit_col = u_cols[0] if u_cols else (df_clients.columns[2] if len(df_clients.columns) >= 3 else None)
-        c_name_col = n_cols[0] if n_cols else (df_clients.columns[0] if len(df_clients.columns) >= 1 else None)
+        # Dynamically map the Unit and Name columns based on headers
+        for col in df_clients.columns:
+            c_upper = str(col).upper()
+            if 'UNIT' in c_upper:
+                c_unit_col = col
+            if 'NAME' in c_upper or 'CLIENT' in c_upper:
+                c_name_col = col
 
     st.subheader("1. Project & Asset Context")
     col_u1, col_u2 = st.columns(2)
@@ -152,35 +160,33 @@ if df_fact is not None and not df_fact.empty:
                 
             safe_selected_unit = super_clean(selected_unit)
             
-            # 3. Finding the "Name" Column
-            name_col_idx = 0
-            for i, col in enumerate(df_clients.columns):
-                if 'NAME' in str(col).upper() or 'CLIENT' in str(col).upper():
-                    name_col_idx = i
-                    break
-                    
-            # 4. Searching Row-by-Row
-            for row_idx in range(len(df_clients)):
-                row = df_clients.iloc[row_idx]
-                cleaned_cells = [super_clean(cell) for cell in row.values]
-                
-                if safe_selected_unit in cleaned_cells:
-                    raw_name = str(row.iloc[name_col_idx]).strip()
-                    
-                    # 5. The Failsafe (Edge Case Handling)
-                    # Check if it grabbed a bad value or the Unit ID by mistake
-                    if raw_name.upper() in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"] or super_clean(raw_name) == safe_selected_unit:
-                        for cell in row.values:
-                            cell_str = str(cell).strip()
-                            if cell_str.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"] and super_clean(cell_str) != safe_selected_unit:
-                                raw_name = cell_str
-                                break
-                                
+            # Fast vectorized match (Using columns mapped above)
+            if c_unit_col is not None and c_name_col is not None:
+                df_clients['_safe_unit'] = df_clients[c_unit_col].apply(super_clean)
+                match_row = df_clients[df_clients['_safe_unit'] == safe_selected_unit]
+                if not match_row.empty:
+                    raw_name = str(match_row.iloc[0][c_name_col]).strip()
                     if raw_name.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
                         db_client_name = raw_name
-                    break
+            
+            # Failsafe fallback: Deep sweep of all cells in dataframe if exact mapping fails
+            if not db_client_name:
+                for row_idx in range(len(df_clients)):
+                    row = df_clients.iloc[row_idx]
+                    cleaned_cells = [super_clean(cell) for cell in row.values]
+                    
+                    if safe_selected_unit in cleaned_cells:
+                        for cell in row.values:
+                            cell_str = str(cell).strip()
+                            # Select the first column that has text and is NOT the unit ID itself
+                            if cell_str.upper() not in ["", "NAN", "NONE", "NULL", "0.0", "0", "0.00"]:
+                                if super_clean(cell_str) != safe_selected_unit:
+                                    db_client_name = cell_str
+                                    break
+                        if db_client_name:
+                            break
 
-        # 6. Pushing to the UI
+        # Push to the UI
         client_name = st.text_input("Client Name Reference (Optional)", value=db_client_name, autocomplete="off")
 
     # 4. Extract metadata from FACT Table SECOND
