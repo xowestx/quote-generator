@@ -710,11 +710,12 @@ if df_fact is not None and not df_fact.empty:
         except: 
             base_rate = 0.0
             
-        # Add exactly 50,000 to the base unit rate as requested
-        final_rate = base_rate + 50000.0
-        calculated_line_item_total = final_rate * cdh_qty
+        # Add exactly 50,000 to the total base cost (Area * Rate in table) + 50,000
+        calculated_line_item_total = (base_rate * cdh_qty) + 50000.0
         
-        cdh_description = "Required fees for Supply and install reinforced concrete slab for closing double height as per drawings."
+        # Format the quantity to remove decimals if it's a whole number for the description
+        formatted_qty = int(cdh_qty) if cdh_qty.is_integer() else cdh_qty
+        cdh_description = f"Required fees for Supply and install reinforced concrete slab for closing double height for {formatted_qty} sqm as per drawings."
         
         # Manage suffix to display on generated docs properly
         financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 24 months" if "24" in str(chosen_term_option) else f" - {chosen_term_option}"
@@ -723,9 +724,9 @@ if df_fact is not None and not df_fact.empty:
         st.session_state.staged_items = [{
             'No.': 1, 
             'Description': cdh_description, 
-            'Unit': 'SQM', 
-            'QTY': float(cdh_qty), 
-            'Rate': final_rate, 
+            'Unit': 'LS', 
+            'QTY': 1.0, 
+            'Rate': calculated_line_item_total, 
             'Total Amount': calculated_line_item_total,
             'Financing Options': chosen_term_option, 
             'Lookup Name': resolved_request_name
