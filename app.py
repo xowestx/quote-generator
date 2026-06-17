@@ -128,14 +128,21 @@ if df_fact is not None and not df_fact.empty:
             c_unit_col = next((c for c in df_clients.columns if 'UNIT ID' in str(c).upper() or 'UNIT' in str(c).upper()), None)
             
             if name_col and c_unit_col:
-                # 2. Simple, direct Pandas lookup (Match Unit ID -> Extract Client Name)
-                target_u = str(selected_unit).strip().upper()
+                # Create a strict cleanup function for comparison to guarantee 100% matches
+                def clean_for_match(val):
+                    v = str(val).strip()
+                    if v.endswith('.0'): v = v[:-2]
+                    return re.sub(r'[\s\-_/]+', '', v).upper()
+
+                # 2. Match Unit ID -> Extract Client Name
+                target_u_clean = clean_for_match(selected_unit)
                 
-                # Standardize the column temporarily for a safe comparison
-                df_clients['__clean_unit'] = df_clients[c_unit_col].astype(str).str.strip().str.upper()
-                matched_rows = df_clients[df_clients['__clean_unit'] == target_u]
+                # Standardize the column temporarily for a safe and robust comparison
+                df_clients['__clean_unit'] = df_clients[c_unit_col].apply(clean_for_match)
+                matched_rows = df_clients[df_clients['__clean_unit'] == target_u_clean]
                 
                 if not matched_rows.empty:
+                    # Grab exact cell directly
                     raw_name = str(matched_rows.iloc[0][name_col]).strip()
                     
                     # 3. Filter out Pandas NaN artifacts
