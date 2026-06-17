@@ -249,13 +249,23 @@ if df_fact is not None and not df_fact.empty:
     st.write("") # Spacer for clean UI
     
     # Render Second Row (New Data)
+    def grey_metric(label, value):
+        st.markdown(
+            f"""
+            <div style="color: #737373;">
+                <p style="font-size: 14px; margin-bottom: 0px; padding-bottom: 0px;">{label}</p>
+                <p style="font-size: 1.8rem; padding-top: 0px; margin-top: 0px; line-height: 1.2;">{value}</p>
+            </div>
+            """, unsafe_allow_html=True
+        )
+
     m4, m5, m6, m7, m8, m9 = st.columns(6)
-    m4.metric("Land Area", fmt_sqm(land_area))
-    m5.metric("Built Up Area", fmt_sqm(unit_bua))
-    m6.metric("Bedrooms", fmt_val(bedrooms, is_qty=True))
-    m7.metric("Bathrooms", fmt_val(bathrooms, is_qty=True))
-    m8.metric("Floors", fmt_val(floors, is_qty=True))
-    m9.metric("Foot Print", fmt_sqm(footprint))
+    with m4: grey_metric("Land Area", fmt_sqm(land_area))
+    with m5: st.metric("Built Up Area", fmt_sqm(unit_bua))
+    with m6: grey_metric("Bedrooms", fmt_val(bedrooms, is_qty=True))
+    with m7: grey_metric("Bathrooms", fmt_val(bathrooms, is_qty=True))
+    with m8: grey_metric("Floors", fmt_val(floors, is_qty=True))
+    with m9: grey_metric("Foot Print", fmt_sqm(footprint))
     
     st.divider()
 
