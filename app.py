@@ -435,7 +435,7 @@ if df_fact is not None and not df_fact.empty:
                 # ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
                 # Kitchen
                 kitchen_desc = f"Supply and install kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
-                kitchen_rate = 154350.00 if pkg_code_letter == 'L' else 120050.00 if pkg_code_letter == 'D' else 85750.00
+                kitchen_rate = 354350.00 if pkg_code_letter == 'L' else 270050.00 if pkg_code_letter == 'D' else 185750.00
                 new_staged.append({
                     'No.': len(new_staged) + 1, 'Description': kitchen_desc, 'Unit': 'LS', 'QTY': 1.0,
                     'Rate': kitchen_rate, 'Total Amount': kitchen_rate, 'Lookup Name': fur_request_name, 'Base Key': f"KITCHEN - {pkg_code_letter}", 'Multiplier': 1.0
@@ -650,7 +650,7 @@ if df_fact is not None and not df_fact.empty:
                                 
                             # BULK ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
                             kitchen_desc = f"Supply and install kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
-                            kitchen_rate = 154350.00 if pkg_code_letter == 'L' else 120050.00 if pkg_code_letter == 'D' else 85750.00
+                            kitchen_rate = 354350.00 if pkg_code_letter == 'L' else 270050.00 if pkg_code_letter == 'D' else 185750.00
                             staged_items_payload.append({
                                 "description": kitchen_desc, "unit": "LS", "qty": 1.0, "rate": kitchen_rate
                             })
