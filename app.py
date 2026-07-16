@@ -848,6 +848,17 @@ if df_fact is not None and not df_fact.empty:
                     'Area / QTY (NO.)': 10.0,
                     'prev_Type': 'Musky'
                 }]
+
+                # Dedicated lightweight Pergola state. Each row receives a stable ID so
+                # adding, deleting, changing type, and changing quantity do not rebuild
+                # the full editor or lose the user's current values.
+                st.session_state.pergola_rows = [{
+                    '_id': 1,
+                    'Type': 'Musky',
+                    'Description': PERGOLA_RULES['Musky']['desc'],
+                    'Area / QTY (NO.)': 10.0
+                }]
+                st.session_state.pergola_next_id = 2
             else:
                 initial_data = [{
                     'Description': '',
@@ -861,160 +872,230 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.custom_editor_version = st.session_state.get('custom_editor_version', 0) + 1
 
         if selected_request_type == "Pergola":
-            col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
+            # ==============================================================
+            # FAST PERGOLA EDITOR
+            # ==============================================================
+            # st.fragment isolates all Pergola interactions from the rest of
+            # the application. Type, quantity, add, delete, and description
+            # edits rerun only this small function instead of the entire app.
 
-            pergola_columns = ["Type", "Description", "Area / QTY (NO.)", "prev_Type"]
-            pergola_data = st.session_state.custom_boq_data.copy()
+            if 'pergola_rows' not in st.session_state:
+                st.session_state.pergola_rows = [{
+                    '_id': 1,
+                    'Type': 'Musky',
+                    'Description': PERGOLA_RULES['Musky']['desc'],
+                    'Area / QTY (NO.)': 10.0
+                }]
+                st.session_state.pergola_next_id = 2
 
-            # Guarantee the complete Pergola schema, including after adding a dynamic row.
-            for col in pergola_columns:
-                if col not in pergola_data.columns:
-                    pergola_data[col] = None
-            pergola_data = pergola_data[pergola_columns]
+            def add_default_pergola_row():
+                """Append one ready-to-use Musky row without asking for a type."""
+                row_id = int(st.session_state.get('pergola_next_id', 1))
+                st.session_state.pergola_next_id = row_id + 1
+                st.session_state.pergola_rows.append({
+                    '_id': row_id,
+                    'Type': 'Musky',
+                    'Description': PERGOLA_RULES['Musky']['desc'],
+                    'Area / QTY (NO.)': 10.0
+                })
 
-            editor_key = f"custom_boq_editor_{st.session_state.get('custom_editor_version', 0)}"
+            def delete_pergola_row(row_id):
+                """Delete a row before the fragment is redrawn."""
+                st.session_state.pergola_rows = [
+                    row for row in st.session_state.pergola_rows
+                    if int(row.get('_id', -1)) != int(row_id)
+                ]
 
-            with col_editor:
-                edited_df = st.data_editor(
-                    pergola_data,
-                    key=editor_key,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_order=["Type", "Description", "Area / QTY (NO.)"],
-                    column_config={
-                        "Type": st.column_config.SelectboxColumn(
-                            "Type",
-                            options=list(PERGOLA_RULES.keys()),
-                            default="Musky",
-                            required=True
-                        ),
-                        "Description": st.column_config.TextColumn("Description"),
-                        "Area / QTY (NO.)": st.column_config.NumberColumn(
-                            "Area / QTY (NO.)",
-                            min_value=0.0,
-                            default=10.0
-                        ),
-                        "prev_Type": None
-                    }
-                )
+                # Remove obsolete widget state for the deleted row.
+                for prefix in ('pergola_type_', 'pergola_desc_', 'pergola_qty_'):
+                    st.session_state.pop(f'{prefix}{row_id}', None)
 
-            normalized_rows = []
-            final_rows = []
-            requires_editor_refresh = False
+            # Use a no-op decorator only as a compatibility fallback. For the
+            # optimized behavior, Streamlit 1.37 or later is recommended.
+            fragment_decorator = getattr(st, 'fragment', lambda func: func)
 
-            # Normalize every row so newly added items and changed types always receive
-            # the correct description, quantity basis, unit, rate, and total.
-            for row_position, (_, row) in enumerate(edited_df.iterrows(), start=1):
-                raw_type = row.get("Type", "Musky")
-                p_type = "" if pd.isna(raw_type) else str(raw_type).strip()
-                if p_type not in PERGOLA_RULES:
-                    p_type = "Musky"
-                    requires_editor_refresh = True
+            @fragment_decorator
+            def render_pergola_editor():
+                top_left, top_right = st.columns([1.25, 3.75])
+                with top_left:
+                    st.button(
+                        "➕ Add New Row",
+                        key="add_default_pergola_row",
+                        on_click=add_default_pergola_row,
+                        use_container_width=True,
+                        help="Adds a new Musky Pergola row with 10 sqm by default."
+                    )
+                with top_right:
+                    st.caption(
+                        "New rows are added immediately as Musky. Type and quantity changes "
+                        "recalculate inside this section only."
+                    )
 
-                raw_prev_type = row.get("prev_Type", "")
-                prev_type = "" if pd.isna(raw_prev_type) else str(raw_prev_type).strip()
-                is_new_row = prev_type not in PERGOLA_RULES
-                type_changed = not is_new_row and p_type != prev_type
+                rows = list(st.session_state.get('pergola_rows', []))
 
-                raw_description = row.get("Description", "")
-                current_desc = "" if pd.isna(raw_description) else str(raw_description).strip()
+                if not rows:
+                    st.info("No Pergola items. Press **Add New Row** to add a default Musky item.")
+                    st.session_state.custom_boq_data = pd.DataFrame(
+                        columns=['Type', 'Description', 'Area / QTY (NO.)', 'prev_Type']
+                    )
+                    st.session_state.staged_items = []
+                    return
 
-                raw_qty = pd.to_numeric(row.get("Area / QTY (NO.)", None), errors='coerce')
-                qty_input = None if pd.isna(raw_qty) else float(raw_qty)
+                # Table-style headings.
+                header_cols = st.columns([0.35, 1.15, 3.25, 1.05, 0.65, 1.0, 1.15, 0.42])
+                headers = ["No.", "Type", "Description", "Area / Qty", "Unit", "Rate", "Total", ""]
+                for col, title in zip(header_cols, headers):
+                    col.markdown(f"**{title}**")
 
-                # New rows, blank descriptions, and changed types receive the official description.
-                if is_new_row or type_changed or not current_desc:
-                    resolved_desc = PERGOLA_RULES[p_type]["desc"]
-                    requires_editor_refresh = True
-                else:
-                    resolved_desc = current_desc
+                updated_rows = []
+                final_rows = []
 
-                # Apply safe quantity defaults without unexpectedly erasing a user's area.
-                if qty_input is None or qty_input <= 0:
-                    qty_input = 1.0 if p_type == "Retractable" else 10.0
-                    requires_editor_refresh = True
+                for position, source_row in enumerate(rows, start=1):
+                    row = dict(source_row)
+                    row_id = int(row.get('_id', position))
 
-                if type_changed:
-                    if p_type == "Retractable":
-                        # Retractable Pergola is priced per item.
-                        qty_input = 1.0
-                    elif prev_type == "Retractable" and qty_input <= 1.0:
-                        # Returning from item-based pricing to area-based pricing.
-                        qty_input = 10.0
-                    # Standard-to-standard type changes preserve the entered area.
-                    requires_editor_refresh = True
+                    current_type = str(row.get('Type', 'Musky')).strip()
+                    if current_type not in PERGOLA_RULES:
+                        current_type = 'Musky'
 
-                if p_type == "Retractable":
-                    qty_input = float(max(1, int(qty_input)))
-                    unit = "Item"
-                    qty = int(qty_input)
-                    rate = PERGOLA_RULES[p_type]["rate"]
-                    total = qty * rate
-                else:
-                    base_rate = PERGOLA_RULES[p_type]["rate"]
-                    if qty_input < 10.0:
-                        unit = "LS"
-                        qty = 1.0
-                        rate = 10.0 * base_rate
-                        total = rate
+                    current_description = str(
+                        row.get('Description', PERGOLA_RULES[current_type]['desc'])
+                    ).strip()
+                    if not current_description:
+                        current_description = PERGOLA_RULES[current_type]['desc']
+
+                    current_qty = pd.to_numeric(
+                        row.get('Area / QTY (NO.)', 10.0), errors='coerce'
+                    )
+                    if pd.isna(current_qty) or float(current_qty) <= 0:
+                        current_qty = 1.0 if current_type == 'Retractable' else 10.0
+                    current_qty = float(current_qty)
+
+                    type_key = f"pergola_type_{row_id}"
+                    desc_key = f"pergola_desc_{row_id}"
+                    qty_key = f"pergola_qty_{row_id}"
+
+                    row_cols = st.columns([0.35, 1.15, 3.25, 1.05, 0.65, 1.0, 1.15, 0.42])
+                    row_cols[0].markdown(f"**{position}**")
+
+                    selected_type = row_cols[1].selectbox(
+                        f"Pergola Type {position}",
+                        options=list(PERGOLA_RULES.keys()),
+                        index=list(PERGOLA_RULES.keys()).index(current_type),
+                        key=type_key,
+                        label_visibility="collapsed"
+                    )
+
+                    # Apply the official data immediately when the type changes.
+                    if selected_type != current_type:
+                        old_type = current_type
+                        current_type = selected_type
+                        current_description = PERGOLA_RULES[current_type]['desc']
+
+                        if current_type == 'Retractable':
+                            current_qty = 1.0
+                        elif old_type == 'Retractable':
+                            current_qty = 10.0
+
+                        # These widgets have not been created yet during this run,
+                        # so clearing their old state safely loads the new defaults.
+                        st.session_state.pop(desc_key, None)
+                        st.session_state.pop(qty_key, None)
+
+                    entered_description = row_cols[2].text_area(
+                        f"Description {position}",
+                        value=current_description,
+                        key=desc_key,
+                        height=76,
+                        label_visibility="collapsed"
+                    )
+
+                    entered_qty = row_cols[3].number_input(
+                        f"Area or Quantity {position}",
+                        min_value=0.0,
+                        value=float(current_qty),
+                        step=1.0,
+                        key=qty_key,
+                        label_visibility="collapsed"
+                    )
+
+                    if current_type == 'Retractable':
+                        pricing_qty = max(1, int(entered_qty))
+                        unit = "Item"
+                        boq_qty = float(pricing_qty)
+                        rate = float(PERGOLA_RULES[current_type]['rate'])
+                        total = boq_qty * rate
                     else:
-                        unit = "SQM"
-                        qty = qty_input
-                        rate = base_rate
-                        total = qty_input * base_rate
+                        pricing_qty = float(entered_qty)
+                        base_rate = float(PERGOLA_RULES[current_type]['rate'])
 
-                normalized_rows.append({
-                    "Type": p_type,
-                    "Description": resolved_desc,
-                    "Area / QTY (NO.)": qty_input,
-                    "prev_Type": p_type
-                })
+                        # Standard Pergolas have a minimum charge of 10 sqm.
+                        if pricing_qty < 10.0:
+                            unit = "LS"
+                            boq_qty = 1.0
+                            rate = 10.0 * base_rate
+                            total = rate
+                        else:
+                            unit = "SQM"
+                            boq_qty = pricing_qty
+                            rate = base_rate
+                            total = pricing_qty * base_rate
 
-                final_rows.append({
-                    'No.': row_position,
-                    'Type': p_type,
-                    'Description': resolved_desc,
-                    'Area / QTY (NO.)': qty_input,
-                    'Unit': unit,
-                    'QTY': qty,
-                    'Rate': rate,
-                    'Total Amount': total,
-                    'prev_Type': p_type
-                })
+                    row_cols[4].markdown(unit)
+                    row_cols[5].markdown(f"{rate:,.2f}")
+                    row_cols[6].markdown(f"**{total:,.2f}**")
+                    row_cols[7].button(
+                        "🗑️",
+                        key=f"delete_pergola_{row_id}",
+                        on_click=delete_pergola_row,
+                        args=(row_id,),
+                        help="Delete this row"
+                    )
 
-            normalized_df = pd.DataFrame(normalized_rows, columns=pergola_columns)
-            st.session_state.custom_boq_data = normalized_df
+                    updated_rows.append({
+                        '_id': row_id,
+                        'Type': current_type,
+                        'Description': entered_description.strip() or PERGOLA_RULES[current_type]['desc'],
+                        'Area / QTY (NO.)': float(entered_qty)
+                    })
 
-            # Force a fresh editor instance only when the app has programmatically
-            # corrected a new row or a changed Pergola type. This prevents stale values.
-            if requires_editor_refresh:
-                st.session_state.custom_editor_version = st.session_state.get('custom_editor_version', 0) + 1
-                st.rerun()
+                    final_rows.append({
+                        'No.': position,
+                        'Type': current_type,
+                        'Description': entered_description.strip() or PERGOLA_RULES[current_type]['desc'],
+                        'Area / QTY (NO.)': float(entered_qty),
+                        'Unit': unit,
+                        'QTY': boq_qty,
+                        'Rate': rate,
+                        'Total Amount': total,
+                        'prev_Type': current_type
+                    })
 
-            final_columns = [
-                'No.', 'Type', 'Description', 'Area / QTY (NO.)',
-                'Unit', 'QTY', 'Rate', 'Total Amount', 'prev_Type'
-            ]
-            final_df = pd.DataFrame(final_rows, columns=final_columns)
-
-            with col_no:
-                st.dataframe(
-                    final_df[['No.']],
-                    hide_index=True,
-                    use_container_width=True
-                )
-
-            with col_total:
-                st.dataframe(
-                    final_df[['Unit', 'Rate', 'Total Amount']],
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
-                        "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
+                # Store one clean source of truth for exports and PDF generation.
+                st.session_state.pergola_rows = updated_rows
+                final_df = pd.DataFrame(final_rows)
+                st.session_state.custom_boq_data = pd.DataFrame([
+                    {
+                        'Type': row['Type'],
+                        'Description': row['Description'],
+                        'Area / QTY (NO.)': row['Area / QTY (NO.)'],
+                        'prev_Type': row['Type']
                     }
-                )
+                    for row in updated_rows
+                ])
+                st.session_state.staged_items = final_df.to_dict('records')
+
+                subtotal = float(final_df['Total Amount'].sum()) if not final_df.empty else 0.0
+                vat = subtotal * 0.14
+                total_with_vat = subtotal + vat
+
+                st.markdown("---")
+                total_col, vat_col = st.columns(2)
+                total_col.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+                vat_col.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
+            render_pergola_editor()
+            summary_df = pd.DataFrame(st.session_state.get('staged_items', []))
 
         else:
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
@@ -1059,18 +1140,19 @@ if df_fact is not None and not df_fact.empty:
                     }
                 )
 
-        st.session_state.staged_items = final_df.to_dict('records')
-        summary_df = final_df
-        
-        subtotal = final_df['Total Amount'].sum()
-        vat = subtotal * 0.14
-        total_with_vat = subtotal + vat
-        
-        col_t1, col_t2 = st.columns(2)
-        if selected_request_type == "Land Extension": col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        else:
-            col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-            col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+            st.session_state.staged_items = final_df.to_dict('records')
+            summary_df = final_df
+
+            subtotal = final_df['Total Amount'].sum()
+            vat = subtotal * 0.14
+            total_with_vat = subtotal + vat
+
+            col_t1, col_t2 = st.columns(2)
+            if selected_request_type == "Land Extension":
+                col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+            else:
+                col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+                col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     st.divider()
 
