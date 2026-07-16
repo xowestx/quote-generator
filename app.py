@@ -811,92 +811,253 @@ if df_fact is not None and not df_fact.empty:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
         st.info("💡 **Tip:** Type smoothly in the center! The read-only previews calculate No., Unit, Rate, and Total instantly.")
         
+        PERGOLA_RULES = {
+            "Musky": {
+                "rate": 3530.0,
+                "desc": "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+            },
+            "Pitch Pine": {
+                "rate": 6470.0,
+                "desc": "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+            },
+            "Khashamonium": {
+                "rate": 11200.0,
+                "desc": "Supply & Install Khashamonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
+            },
+            "Retractable": {
+                "rate": 67500.0,
+                "desc": "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
+            }
+        }
+
+        # Reset the custom editor cleanly whenever the request type changes.
+        # The versioned widget key prevents Streamlit from restoring stale editor state
+        # from a previously selected product/request type.
         if 'custom_boq_data' not in st.session_state or st.session_state.get('last_type') != selected_request_type:
             if selected_request_type == "Land Extension":
-                initial_data = [{'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.', 'Unit': 'M2', 'QTY': 0.0, 'Rate': 65000.0}]
+                initial_data = [{
+                    'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
+                    'Unit': 'M2',
+                    'QTY': 0.0,
+                    'Rate': 65000.0
+                }]
             elif selected_request_type == "Pergola":
-                initial_data = [{'Type': 'Musky', 'Description': 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.', 'Area / QTY (NO.)': 10.0, 'prev_Type': 'Musky'}]
+                initial_data = [{
+                    'Type': 'Musky',
+                    'Description': PERGOLA_RULES['Musky']['desc'],
+                    'Area / QTY (NO.)': 10.0,
+                    'prev_Type': 'Musky'
+                }]
             else:
-                initial_data = [{'Description': '', 'Unit': 'LS', 'QTY': 1.0, 'Rate': 0.0}]
+                initial_data = [{
+                    'Description': '',
+                    'Unit': 'LS',
+                    'QTY': 1.0,
+                    'Rate': 0.0
+                }]
+
             st.session_state.custom_boq_data = pd.DataFrame(initial_data)
             st.session_state.last_type = selected_request_type
-        
+            st.session_state.custom_editor_version = st.session_state.get('custom_editor_version', 0) + 1
+
         if selected_request_type == "Pergola":
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
-            if 'prev_Type' not in st.session_state.custom_boq_data.columns: st.session_state.custom_boq_data['prev_Type'] = st.session_state.custom_boq_data['Type']
-                
+
+            pergola_columns = ["Type", "Description", "Area / QTY (NO.)", "prev_Type"]
+            pergola_data = st.session_state.custom_boq_data.copy()
+
+            # Guarantee the complete Pergola schema, including after adding a dynamic row.
+            for col in pergola_columns:
+                if col not in pergola_data.columns:
+                    pergola_data[col] = None
+            pergola_data = pergola_data[pergola_columns]
+
+            editor_key = f"custom_boq_editor_{st.session_state.get('custom_editor_version', 0)}"
+
             with col_editor:
                 edited_df = st.data_editor(
-                    st.session_state.custom_boq_data, key="custom_boq_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
+                    pergola_data,
+                    key=editor_key,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
                     column_order=["Type", "Description", "Area / QTY (NO.)"],
-                    column_config={"Type": st.column_config.SelectboxColumn("Type", options=["Musky", "Pitch Pine", "Khashamonium", "Retractable"], default="Musky"), "Description": st.column_config.TextColumn("Description"), "Area / QTY (NO.)": st.column_config.NumberColumn("Area / QTY (NO.)", min_value=0.0, default=10.0)}
+                    column_config={
+                        "Type": st.column_config.SelectboxColumn(
+                            "Type",
+                            options=list(PERGOLA_RULES.keys()),
+                            default="Musky",
+                            required=True
+                        ),
+                        "Description": st.column_config.TextColumn("Description"),
+                        "Area / QTY (NO.)": st.column_config.NumberColumn(
+                            "Area / QTY (NO.)",
+                            min_value=0.0,
+                            default=10.0
+                        ),
+                        "prev_Type": None
+                    }
                 )
-                
-            PERGOLA_RULES = {
-                "Musky": {"rate": 3530.0, "desc": 'Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.'},
-                "Pitch Pine": {"rate": 6470.0, "desc": 'Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.'},
-                "Khashamonium": {"rate": 11200.0, "desc": 'Supply & Install Khashamonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture.'},
-                "Retractable": {"rate": 67500.0, "desc": 'Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric.'}
-            }
-            
-            final_rows = []
-            has_changes = False
-            if 'prev_Type' not in edited_df.columns: edited_df['prev_Type'] = edited_df['Type'].fillna('Musky')
 
-            for idx, row in edited_df.iterrows():
-                p_type = row.get("Type", "Musky")
-                prev_type = row.get("prev_Type", "")
-                current_desc = str(row.get("Description", "")).strip()
-                
-                if pd.isna(prev_type) or p_type != prev_type:
+            normalized_rows = []
+            final_rows = []
+            requires_editor_refresh = False
+
+            # Normalize every row so newly added items and changed types always receive
+            # the correct description, quantity basis, unit, rate, and total.
+            for row_position, (_, row) in enumerate(edited_df.iterrows(), start=1):
+                raw_type = row.get("Type", "Musky")
+                p_type = "" if pd.isna(raw_type) else str(raw_type).strip()
+                if p_type not in PERGOLA_RULES:
+                    p_type = "Musky"
+                    requires_editor_refresh = True
+
+                raw_prev_type = row.get("prev_Type", "")
+                prev_type = "" if pd.isna(raw_prev_type) else str(raw_prev_type).strip()
+                is_new_row = prev_type not in PERGOLA_RULES
+                type_changed = not is_new_row and p_type != prev_type
+
+                raw_description = row.get("Description", "")
+                current_desc = "" if pd.isna(raw_description) else str(raw_description).strip()
+
+                raw_qty = pd.to_numeric(row.get("Area / QTY (NO.)", None), errors='coerce')
+                qty_input = None if pd.isna(raw_qty) else float(raw_qty)
+
+                # New rows, blank descriptions, and changed types receive the official description.
+                if is_new_row or type_changed or not current_desc:
                     resolved_desc = PERGOLA_RULES[p_type]["desc"]
-                    edited_df.at[idx, "Description"] = resolved_desc
-                    edited_df.at[idx, "prev_Type"] = p_type
-                    if p_type == "Retractable": edited_df.at[idx, "Area / QTY (NO.)"] = 1.0
-                    else: edited_df.at[idx, "Area / QTY (NO.)"] = 10.0
-                    has_changes = True
-                else: resolved_desc = current_desc
-                
-                qty_input = float(row.get("Area / QTY (NO.)", 10.0))
-                
+                    requires_editor_refresh = True
+                else:
+                    resolved_desc = current_desc
+
+                # Apply safe quantity defaults without unexpectedly erasing a user's area.
+                if qty_input is None or qty_input <= 0:
+                    qty_input = 1.0 if p_type == "Retractable" else 10.0
+                    requires_editor_refresh = True
+
+                if type_changed:
+                    if p_type == "Retractable":
+                        # Retractable Pergola is priced per item.
+                        qty_input = 1.0
+                    elif prev_type == "Retractable" and qty_input <= 1.0:
+                        # Returning from item-based pricing to area-based pricing.
+                        qty_input = 10.0
+                    # Standard-to-standard type changes preserve the entered area.
+                    requires_editor_refresh = True
+
                 if p_type == "Retractable":
+                    qty_input = float(max(1, int(qty_input)))
                     unit = "Item"
-                    qty = int(qty_input) if qty_input > 0 else 1
-                    rate = 67500.0
+                    qty = int(qty_input)
+                    rate = PERGOLA_RULES[p_type]["rate"]
                     total = qty * rate
                 else:
                     base_rate = PERGOLA_RULES[p_type]["rate"]
-                    if qty_input < 10.0: unit, qty, rate, total = "LS", 1.0, 10.0 * base_rate, 10.0 * base_rate
-                    else: unit, qty, rate, total = "SQM", qty_input, base_rate, qty_input * base_rate
-                        
-                final_rows.append({'No.': idx + 1, 'Type': p_type, 'Description': resolved_desc, 'Area / QTY (NO.)': qty_input, 'Unit': unit, 'QTY': qty, 'Rate': rate, 'Total Amount': total, 'prev_Type': p_type})
-                
-            if has_changes:
-                st.session_state.custom_boq_data = edited_df
+                    if qty_input < 10.0:
+                        unit = "LS"
+                        qty = 1.0
+                        rate = 10.0 * base_rate
+                        total = rate
+                    else:
+                        unit = "SQM"
+                        qty = qty_input
+                        rate = base_rate
+                        total = qty_input * base_rate
+
+                normalized_rows.append({
+                    "Type": p_type,
+                    "Description": resolved_desc,
+                    "Area / QTY (NO.)": qty_input,
+                    "prev_Type": p_type
+                })
+
+                final_rows.append({
+                    'No.': row_position,
+                    'Type': p_type,
+                    'Description': resolved_desc,
+                    'Area / QTY (NO.)': qty_input,
+                    'Unit': unit,
+                    'QTY': qty,
+                    'Rate': rate,
+                    'Total Amount': total,
+                    'prev_Type': p_type
+                })
+
+            normalized_df = pd.DataFrame(normalized_rows, columns=pergola_columns)
+            st.session_state.custom_boq_data = normalized_df
+
+            # Force a fresh editor instance only when the app has programmatically
+            # corrected a new row or a changed Pergola type. This prevents stale values.
+            if requires_editor_refresh:
+                st.session_state.custom_editor_version = st.session_state.get('custom_editor_version', 0) + 1
                 st.rerun()
-            else:
-                st.session_state.custom_boq_data = edited_df
-                
-            final_df = pd.DataFrame(final_rows)
-            with col_no: st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
-            with col_total: st.dataframe(final_df[['Unit', 'Rate', 'Total Amount']], hide_index=True, use_container_width=True, column_config={"Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"), "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")})
+
+            final_columns = [
+                'No.', 'Type', 'Description', 'Area / QTY (NO.)',
+                'Unit', 'QTY', 'Rate', 'Total Amount', 'prev_Type'
+            ]
+            final_df = pd.DataFrame(final_rows, columns=final_columns)
+
+            with col_no:
+                st.dataframe(
+                    final_df[['No.']],
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+            with col_total:
+                st.dataframe(
+                    final_df[['Unit', 'Rate', 'Total Amount']],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Rate": st.column_config.NumberColumn("Rate", format="%.2f EGP"),
+                        "Total Amount": st.column_config.NumberColumn("Total", format="%.2f EGP")
+                    }
+                )
 
         else:
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
+            editor_key = f"custom_boq_editor_{st.session_state.get('custom_editor_version', 0)}"
+
             with col_editor:
                 edited_df = st.data_editor(
-                    st.session_state.custom_boq_data, key="custom_boq_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
-                    column_config={"Description": st.column_config.TextColumn("Description"), "Unit": st.column_config.SelectboxColumn("Unit", options=["SQM", "M2", "LM", "NO.", "LS", "Other"], default="LS"), "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0), "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)}
+                    st.session_state.custom_boq_data,
+                    key=editor_key,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Description": st.column_config.TextColumn("Description"),
+                        "Unit": st.column_config.SelectboxColumn(
+                            "Unit",
+                            options=["SQM", "M2", "LM", "NO.", "LS", "Other"],
+                            default="LS"
+                        ),
+                        "QTY": st.column_config.NumberColumn("QTY", min_value=0.0, default=1.0),
+                        "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
+                    }
                 )
-            
+
             final_df = edited_df.copy()
             final_df['QTY'] = pd.to_numeric(final_df['QTY'], errors='coerce').fillna(0.0)
             final_df['Rate'] = pd.to_numeric(final_df['Rate'], errors='coerce').fillna(0.0)
             final_df['Total Amount'] = final_df['QTY'] * final_df['Rate']
             final_df.insert(0, 'No.', range(1, len(final_df) + 1))
-            
-            with col_no: st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
-            with col_total: st.dataframe(final_df[['Total Amount']], hide_index=True, use_container_width=True, column_config={"Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")})
+            st.session_state.custom_boq_data = edited_df
+
+            with col_no:
+                st.dataframe(final_df[['No.']], hide_index=True, use_container_width=True)
+
+            with col_total:
+                st.dataframe(
+                    final_df[['Total Amount']],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")
+                    }
+                )
 
         st.session_state.staged_items = final_df.to_dict('records')
         summary_df = final_df
