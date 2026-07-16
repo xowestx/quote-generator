@@ -910,6 +910,41 @@ if df_fact is not None and not df_fact.empty:
                 for prefix in ('pergola_type_', 'pergola_desc_', 'pergola_qty_'):
                     st.session_state.pop(f'{prefix}{row_id}', None)
 
+            def update_pergola_type(row_id, type_key, desc_key, qty_key):
+                """Synchronize description and quantity immediately after a type change."""
+                selected_type = st.session_state.get(type_key, 'Musky')
+                if selected_type not in PERGOLA_RULES:
+                    selected_type = 'Musky'
+
+                for row in st.session_state.get('pergola_rows', []):
+                    if int(row.get('_id', -1)) != int(row_id):
+                        continue
+
+                    old_type = str(row.get('Type', 'Musky')).strip()
+                    old_qty = pd.to_numeric(
+                        row.get('Area / QTY (NO.)', 10.0), errors='coerce'
+                    )
+                    if pd.isna(old_qty) or float(old_qty) <= 0:
+                        old_qty = 1.0 if old_type == 'Retractable' else 10.0
+
+                    if selected_type == 'Retractable':
+                        new_qty = 1.0
+                    elif old_type == 'Retractable':
+                        new_qty = 10.0
+                    else:
+                        new_qty = float(old_qty)
+
+                    official_description = PERGOLA_RULES[selected_type]['desc']
+                    row['Type'] = selected_type
+                    row['Description'] = official_description
+                    row['Area / QTY (NO.)'] = new_qty
+
+                    # The callback runs before the fragment reruns, so these widget
+                    # values are refreshed immediately without rerunning the full app.
+                    st.session_state[desc_key] = official_description
+                    st.session_state[qty_key] = new_qty
+                    break
+
             # Use a no-op decorator only as a compatibility fallback. For the
             # optimized behavior, Streamlit 1.37 or later is recommended.
             fragment_decorator = getattr(st, 'fragment', lambda func: func)
@@ -978,33 +1013,30 @@ if df_fact is not None and not df_fact.empty:
                     row_cols = st.columns([0.35, 1.15, 3.25, 1.05, 0.65, 1.0, 1.15, 0.42])
                     row_cols[0].markdown(f"**{position}**")
 
+                    # Initialize widget state once. Afterwards, the type-change
+                    # callback controls the official description and default quantity.
+                    if type_key not in st.session_state:
+                        st.session_state[type_key] = current_type
+                    if desc_key not in st.session_state:
+                        st.session_state[desc_key] = current_description
+                    if qty_key not in st.session_state:
+                        st.session_state[qty_key] = current_qty
+
                     selected_type = row_cols[1].selectbox(
                         f"Pergola Type {position}",
                         options=list(PERGOLA_RULES.keys()),
-                        index=list(PERGOLA_RULES.keys()).index(current_type),
                         key=type_key,
+                        on_change=update_pergola_type,
+                        args=(row_id, type_key, desc_key, qty_key),
                         label_visibility="collapsed"
                     )
 
-                    # Apply the official data immediately when the type changes.
-                    if selected_type != current_type:
-                        old_type = current_type
-                        current_type = selected_type
-                        current_description = PERGOLA_RULES[current_type]['desc']
-
-                        if current_type == 'Retractable':
-                            current_qty = 1.0
-                        elif old_type == 'Retractable':
-                            current_qty = 10.0
-
-                        # These widgets have not been created yet during this run,
-                        # so clearing their old state safely loads the new defaults.
-                        st.session_state.pop(desc_key, None)
-                        st.session_state.pop(qty_key, None)
+                    # The callback has already synchronized the source row before
+                    # this fragment reruns. Always calculate from the selected type.
+                    current_type = selected_type
 
                     entered_description = row_cols[2].text_area(
                         f"Description {position}",
-                        value=current_description,
                         key=desc_key,
                         height=76,
                         label_visibility="collapsed"
@@ -1013,7 +1045,6 @@ if df_fact is not None and not df_fact.empty:
                     entered_qty = row_cols[3].number_input(
                         f"Area or Quantity {position}",
                         min_value=0.0,
-                        value=float(current_qty),
                         step=1.0,
                         key=qty_key,
                         label_visibility="collapsed"
