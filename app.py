@@ -9,6 +9,8 @@ import base64
 import io
 import time
 
+from terms_engine import generate_terms, parse_terms_defaults, validate_terms_values
+
 # Import PDF Merger
 try:
     from pypdf import PdfWriter
@@ -44,6 +46,7 @@ FURNITURE_RATES = {
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzt5KDoxG9DbYPXzFe7HiYJ6WgYdpsYE65p7Zuwnq6PycZdvbtGyCe_8G1OwwM3cxP/exec"
+MASTER_TERMS_SHEET_ID = "1RsLVPPctUJz-ktVM8FRw1f4YsT5TmKyGFIr1-JrwOTA"
 
 @st.cache_data(ttl=60)
 def load_all_tabs(base_url):
@@ -57,7 +60,12 @@ def load_all_tabs(base_url):
         facts = get_csv("FACT")
         products = get_csv("PRODUCTS")
         rates = get_csv("RATES")
-        terms = get_csv("TERMS_%26_CONDITIONS")
+        # Single Terms & Conditions source used by both the UI and Apps Script.
+        terms_url = (
+            f"https://docs.google.com/spreadsheets/d/{MASTER_TERMS_SHEET_ID}"
+            "/gviz/tq?tqx=out:csv&sheet=Sheet1"
+        )
+        terms = pd.read_csv(terms_url)
         
         # Robust fetch for CLIENT NAME: prevents grabbing FACT tab by default if tab name has encoding issues
         clients = pd.DataFrame()
@@ -1212,6 +1220,184 @@ if df_fact is not None and not df_fact.empty:
                 col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
                 col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
+    # --- SECTION 3B: QUOTATION-SPECIFIC TERMS & DURATION ---
+    if st.session_state.staged_items:
+        terms_lookup_name = selected_request_type
+        if (
+            selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"]
+            and "Lookup Name" in st.session_state.staged_items[0]
+        ):
+            terms_lookup_name = st.session_state.staged_items[0]["Lookup Name"]
+
+        terms_request_col = df_terms.columns[0]
+        terms_text_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
+        terms_match = df_terms[
+            df_terms[terms_request_col].astype(str).str.strip().str.upper()
+            == str(terms_lookup_name).strip().upper()
+        ]
+        default_terms_text = (
+            str(terms_match.iloc[0][terms_text_col])
+            if not terms_match.empty
+            else ""
+        )
+
+        terms_context_key = f"{selected_unit}|{terms_lookup_name}"
+        if st.session_state.get("terms_context_key") != terms_context_key:
+            defaults, extraction_warnings = parse_terms_defaults(default_terms_text)
+            st.session_state.terms_context_key = terms_context_key
+            st.session_state.qt_delivery_stage = defaults.delivery_stage
+            st.session_state.qt_duration_months = defaults.duration_months
+            st.session_state.qt_payment_method = defaults.payment_method
+            st.session_state.qt_custom_payment_method = defaults.custom_payment_method
+            st.session_state.qt_down_payment = defaults.down_payment_percent
+            st.session_state.qt_due_event = defaults.due_event
+            st.session_state.qt_custom_due_event = defaults.custom_due_event
+            st.session_state.qt_payment_term_months = defaults.payment_term_months
+            st.session_state.qt_frequency = defaults.installment_frequency
+            st.session_state.qt_validity_days = defaults.offer_validity_days
+            st.session_state.qt_extraction_warnings = extraction_warnings
+
+        st.markdown("### Quotation Terms & Duration")
+        st.caption(
+            "The product's master Terms & Conditions remain unchanged. "
+            "These controls create quotation-specific clauses only."
+        )
+
+        if not default_terms_text:
+            st.error(
+                f"No master Terms & Conditions were found for '{terms_lookup_name}'. "
+                "Document generation is blocked until this request is added to the master sheet."
+            )
+
+        extraction_warnings = st.session_state.get("qt_extraction_warnings", [])
+        if extraction_warnings:
+            with st.expander("Review defaults that could not be extracted", expanded=False):
+                for warning in extraction_warnings:
+                    st.warning(warning)
+
+        term_col1, term_col2, term_col3 = st.columns(3)
+        with term_col1:
+            st.selectbox(
+                "Delivery Stage",
+                ["Pre-Construction", "Post-Delivery"],
+                key="qt_delivery_stage",
+            )
+            st.number_input(
+                "Duration / Handover Extension (Months)",
+                min_value=0,
+                step=1,
+                key="qt_duration_months",
+            )
+            st.selectbox(
+                "Payment Method",
+                ["Post-Dated Cheques", "Bank Transfer", "Other"],
+                key="qt_payment_method",
+            )
+            if st.session_state.qt_payment_method == "Other":
+                st.text_input(
+                    "Other Payment Method",
+                    max_chars=80,
+                    key="qt_custom_payment_method",
+                )
+
+        with term_col2:
+            st.number_input(
+                "Down Payment (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=0.5,
+                key="qt_down_payment",
+            )
+            st.selectbox(
+                "Down-Payment Due Event",
+                ["Upon Approval", "Upon Signing", "Before Start of Work", "Custom"],
+                key="qt_due_event",
+            )
+            if st.session_state.qt_due_event == "Custom":
+                st.text_input(
+                    "Custom Due Event",
+                    max_chars=120,
+                    key="qt_custom_due_event",
+                )
+
+        with term_col3:
+            st.number_input(
+                "Payment Term (Months)",
+                min_value=1,
+                step=1,
+                key="qt_payment_term_months",
+            )
+            st.selectbox(
+                "Installment Frequency",
+                ["Monthly", "Quarterly"],
+                key="qt_frequency",
+            )
+            st.number_input(
+                "Offer Validity (Days)",
+                min_value=1,
+                max_value=365,
+                step=1,
+                key="qt_validity_days",
+            )
+
+        validation_errors = validate_terms_values(
+            st.session_state.qt_duration_months,
+            st.session_state.qt_down_payment,
+            st.session_state.qt_payment_term_months,
+            st.session_state.qt_frequency,
+            st.session_state.qt_validity_days,
+            st.session_state.get("qt_custom_payment_method", ""),
+            st.session_state.qt_payment_method,
+            st.session_state.get("qt_custom_due_event", ""),
+            st.session_state.qt_due_event,
+        )
+        if not default_terms_text:
+            validation_errors.append("Master Terms & Conditions are required.")
+
+        remaining_balance = 100.0 - float(st.session_state.qt_down_payment)
+        installment_count = (
+            int(st.session_state.qt_payment_term_months) // 3
+            if st.session_state.qt_frequency == "Quarterly"
+            and int(st.session_state.qt_payment_term_months) % 3 == 0
+            else int(st.session_state.qt_payment_term_months)
+        )
+        metric_col1, metric_col2 = st.columns(2)
+        metric_col1.metric("Remaining Balance", f"{remaining_balance:g}%")
+        metric_col2.metric("Number of Installments", installment_count)
+
+        generated_terms_text = ""
+        quotation_terms_data = {}
+        if not validation_errors:
+            generated_terms_text, quotation_terms_data = generate_terms(
+                default_terms_text,
+                delivery_stage=st.session_state.qt_delivery_stage,
+                duration_months=int(st.session_state.qt_duration_months),
+                payment_method=st.session_state.qt_payment_method,
+                custom_payment_method=st.session_state.get("qt_custom_payment_method", ""),
+                down_payment_percent=float(st.session_state.qt_down_payment),
+                due_event=st.session_state.qt_due_event,
+                custom_due_event=st.session_state.get("qt_custom_due_event", ""),
+                payment_term_months=int(st.session_state.qt_payment_term_months),
+                installment_frequency=st.session_state.qt_frequency,
+                offer_validity_days=int(st.session_state.qt_validity_days),
+            )
+
+        for validation_error in validation_errors:
+            st.error(validation_error)
+
+        st.session_state.generated_terms_and_conditions = generated_terms_text
+        st.session_state.quotation_terms_data = quotation_terms_data
+        st.session_state.terms_valid = not validation_errors
+
+        st.markdown("#### Generated Terms & Conditions Preview")
+        st.text_area(
+            "Final quotation terms",
+            value=generated_terms_text,
+            height=320,
+            disabled=True,
+            label_visibility="collapsed",
+        )
+
     st.divider()
 
     # --- SECTION 4: EXPORT BUTTONS (SHARED) ---
@@ -1223,7 +1409,12 @@ if df_fact is not None and not df_fact.empty:
             col_export1, col_export2 = st.columns(2)
             
             with col_export1:
-                if st.button("🌐 Generate Official Google Doc via Webhook", use_container_width=True, type="primary"):
+                if st.button(
+                    "🌐 Generate Official Google Doc via Webhook",
+                    use_container_width=True,
+                    type="primary",
+                    disabled=not st.session_state.get("terms_valid", False),
+                ):
                     with st.spinner("Transmitting to Google Workspace..."):
                         
                         resolved_req_name = selected_request_type
@@ -1236,6 +1427,12 @@ if df_fact is not None and not df_fact.empty:
                             "clientName": final_client_name,
                             "zone": str(zone_name),
                             "requestType": resolved_req_name, # Passes the typology name instead of "Furniture"
+                            "generatedTermsAndConditions": st.session_state.get(
+                                "generated_terms_and_conditions", ""
+                            ),
+                            "quotationTermsOverrides": st.session_state.get(
+                                "quotation_terms_data", {}
+                            ),
                             "items": []
                         }
                         
@@ -1350,28 +1547,20 @@ if df_fact is not None and not df_fact.empty:
                     pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
                 pdf.ln(4)
                 
-                if 'Financing Options' in st.session_state.staged_items[0] and selected_request_type in ["Roof Room", "Closing Double Height"]:
+                final_terms_text = st.session_state.get(
+                    "generated_terms_and_conditions", ""
+                )
+                if final_terms_text:
                     pdf.set_font("Helvetica", "B", 11)
-                    pdf.cell(0, 8, "Legal Framework & Strategic Project Adjustments:", ln=True)
+                    pdf.cell(0, 8, "Terms & Conditions:", ln=True)
                     pdf.set_font("Helvetica", "", 8)
-                    
-                    terms_opt_col = df_terms.columns[1] if len(df_terms.columns) > 1 else df_terms.columns[0]
-                    terms_text_col = df_terms.columns[2] if len(df_terms.columns) > 2 else df_terms.columns[-1]
-                    
-                    rule_term = st.session_state.staged_items[0].get('Financing Options')
-                    lookup_request_name = st.session_state.staged_items[0].get('Lookup Name', selected_request_type)
-                    
-                    matched_legal_text_blocks = df_terms[
-                        (df_terms[terms_opt_col] == rule_term) & 
-                        (df_terms[df_terms.columns[0]].str.upper() == lookup_request_name.upper())
-                    ][terms_text_col].values
-                    
-                    if len(matched_legal_text_blocks) > 0:
-                        pdf.multi_cell(0, 4, str(matched_legal_text_blocks[0]))
-                    else:
-                        matched_fallback = df_terms[df_terms[terms_opt_col] == rule_term][terms_text_col].values
-                        if len(matched_fallback) > 0:
-                            pdf.multi_cell(0, 4, str(matched_fallback[0]))
+
+                    def pdf_safe_text(value):
+                        return str(value).encode("latin-1", errors="replace").decode("latin-1")
+
+                    for term_line in final_terms_text.splitlines():
+                        if term_line.strip():
+                            pdf.multi_cell(0, 4, pdf_safe_text(term_line.strip()))
                     pdf.ln(2)
                 
                 try:
@@ -1388,7 +1577,8 @@ if df_fact is not None and not df_fact.empty:
                     data=compiled_pdf_payload,
                     file_name=f"O_West_Proposal_{final_client_name.replace(' ', '_')}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    use_container_width=True,
+                    disabled=not st.session_state.get("terms_valid", False),
                 )
 
             # Document Hub Display
