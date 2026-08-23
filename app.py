@@ -46,7 +46,6 @@ FURNITURE_RATES = {
 # ==========================================
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1uyZXYMvaeuH-ZQOxHgpdyXiC2vlvUHtK3Cmde63cnUY/edit?usp=sharing"
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzzt5KDoxG9DbYPXzFe7HiYJ6WgYdpsYE65p7Zuwnq6PycZdvbtGyCe_8G1OwwM3cxP/exec"
-MASTER_TERMS_SHEET_ID = "1RsLVPPctUJz-ktVM8FRw1f4YsT5TmKyGFIr1-JrwOTA"
 
 @st.cache_data(ttl=60)
 def load_all_tabs(base_url):
@@ -60,12 +59,8 @@ def load_all_tabs(base_url):
         facts = get_csv("FACT")
         products = get_csv("PRODUCTS")
         rates = get_csv("RATES")
-        # Single Terms & Conditions source used by both the UI and Apps Script.
-        terms_url = (
-            f"https://docs.google.com/spreadsheets/d/{MASTER_TERMS_SHEET_ID}"
-            "/gviz/tq?tqx=out:csv&sheet=Sheet1"
-        )
-        terms = pd.read_csv(terms_url)
+        # Terms & Conditions now live in the APP spreadsheet as the single source.
+        terms = get_csv("TERMS%20%26%20CONDITIONS")
         
         # Robust fetch for CLIENT NAME: prevents grabbing FACT tab by default if tab name has encoding issues
         clients = pd.DataFrame()
@@ -1560,6 +1555,9 @@ if df_fact is not None and not df_fact.empty:
 
                     for term_line in final_terms_text.splitlines():
                         if term_line.strip():
+                            # Reset the cursor after prior cells/multi-cells so fpdf has
+                            # the full printable width available for every terms line.
+                            pdf.set_x(pdf.l_margin)
                             pdf.multi_cell(0, 4, pdf_safe_text(term_line.strip()))
                     pdf.ln(2)
                 
