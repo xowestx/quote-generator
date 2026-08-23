@@ -294,35 +294,62 @@ if df_fact is not None and not df_fact.empty:
         target_design_type = str(unit_design_type).strip().upper()
         target_design_opt = str(unit_design_opt).strip().upper()
         
-        filtered_catalog = df_products.copy()
-        
-        # New filtration layer: Filter by Project Match (Containment Check)
-        if prod_project_col and unit_project and unit_project not in ['NAN', 'NONE', '']:
-            def match_project(prod_proj):
-                p = str(prod_proj).strip().upper()
-                if not p or p in ['NAN', 'NONE']: return False
-                # Check if product project is substring of unit project or vice versa
-                return p in unit_project or unit_project in p
-                
-            mask = filtered_catalog[prod_project_col].apply(match_project)
-            if mask.any(): 
-                filtered_catalog = filtered_catalog[mask]
-                
+        # Start with Roof Room products only. Other product categories must never
+        # appear as fallbacks when a unit has no configured Roof Room product.
+        filtered_catalog = df_products[
+            df_products[cat_col].astype(str).str.strip().str.upper() == "ROOF ROOM"
+        ].copy()
+
+        def catalog_value_matches(product_value, target_value):
+            """Blank product values act as wildcards; populated values must match."""
+            product_text = str(product_value).strip().upper()
+            target_text = str(target_value).strip().upper()
+
+            if not product_text or product_text in ['NAN', 'NONE']:
+                return True
+            if not target_text or target_text in ['NAN', 'NONE']:
+                return True
+
+            # Supports cells containing multiple eligible values while preventing
+            # the previous broad-catalog fallback after a failed match.
+            return target_text in product_text or product_text in target_text
+
+        strict_filters = [
+            (prod_project_col, unit_project),
+        ]
+
         prod_unit_type_col = next((c for c in df_products.columns if 'UNIT TYPE' in c.upper()), df_products.columns[2])
         design_type_col = next((c for c in df_products.columns if 'DESIGN TYPE' in c.upper()), df_products.columns[3])
         prod_opt_link_col = next((c for c in df_products.columns if 'OPTION LINK' in c.upper() or 'DESIGN OPTION' in c.upper()), df_products.columns[4])
-        
-        if target_unit_type and target_unit_type not in ['NAN', 'NONE', '']:
-            mask = filtered_catalog[prod_unit_type_col].astype(str).str.upper().apply(lambda x: target_unit_type in x)
-            if mask.any(): filtered_catalog = filtered_catalog[mask]
-        if target_design_type and target_design_type not in ['NAN', 'NONE', '']:
-            mask = filtered_catalog[design_type_col].astype(str).str.upper().apply(lambda x: target_design_type in x)
-            if mask.any(): filtered_catalog = filtered_catalog[mask]
-        if target_design_opt and target_design_opt not in ['NAN', 'NONE', '']:
-            mask = filtered_catalog[prod_opt_link_col].astype(str).str.upper().apply(lambda x: target_design_opt in x)
-            if mask.any(): filtered_catalog = filtered_catalog[mask]
-                
-        if filtered_catalog.empty: filtered_catalog = df_products
+
+        strict_filters.extend([
+            (prod_unit_type_col, target_unit_type),
+            (design_type_col, target_design_type),
+            (prod_opt_link_col, target_design_opt),
+        ])
+
+        for filter_col, target_value in strict_filters:
+            if filter_col and str(target_value).strip().upper() not in ['', 'NAN', 'NONE']:
+                filtered_catalog = filtered_catalog[
+                    filtered_catalog[filter_col].apply(
+                        lambda value: catalog_value_matches(value, target_value)
+                    )
+                ]
+
+        if filtered_catalog.empty:
+            st.session_state.staged_items = []
+            st.error(
+                "No Roof Room product is configured for this unit typology. "
+                f"Project: {unit_project or 'N/A'} | "
+                f"Unit Type: {target_unit_type or 'N/A'} | "
+                f"Design Type: {target_design_type or 'N/A'} | "
+                f"Design Option: {target_design_opt or 'N/A'}"
+            )
+            st.info(
+                "Add the exact eligible typology to the PRODUCTS tab before "
+                "generating a Roof Room quotation."
+            )
+            st.stop()
 
         col_vr, col_fin = st.columns([2, 1])
         with col_vr:
