@@ -860,6 +860,8 @@ if df_fact is not None and not df_fact.empty:
             }
         }
 
+        LAND_EXTENSION_RATE = 55000.0
+
         # Reset the custom editor cleanly whenever the request type changes.
         # The versioned widget key prevents Streamlit from restoring stale editor state
         # from a previously selected product/request type.
@@ -869,7 +871,7 @@ if df_fact is not None and not df_fact.empty:
                     'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
                     'Unit': 'M2',
                     'QTY': 0.0,
-                    'Rate': 55000.0
+                    'Rate': LAND_EXTENSION_RATE
                 }]
             elif selected_request_type == "Pergola":
                 initial_data = [{
@@ -1159,14 +1161,30 @@ if df_fact is not None and not df_fact.empty:
             summary_df = pd.DataFrame(st.session_state.get('staged_items', []))
 
         else:
+            is_land_extension = selected_request_type == "Land Extension"
+
+            # Land Extension uses one centrally controlled rate. Re-apply it on every
+            # rerun so an existing browser session or stale data-editor state cannot
+            # override the official value.
+            if is_land_extension:
+                st.session_state.custom_boq_data = st.session_state.custom_boq_data.copy()
+                st.session_state.custom_boq_data['Unit'] = 'M2'
+                st.session_state.custom_boq_data['Rate'] = LAND_EXTENSION_RATE
+
             col_no, col_editor, col_total = st.columns([0.4, 3.5, 1.1])
-            editor_key = f"custom_boq_editor_{st.session_state.get('custom_editor_version', 0)}"
+            base_editor_key = f"custom_boq_editor_{st.session_state.get('custom_editor_version', 0)}"
+            editor_key = (
+                f"{base_editor_key}_land_extension_{int(LAND_EXTENSION_RATE)}"
+                if is_land_extension
+                else base_editor_key
+            )
 
             with col_editor:
                 edited_df = st.data_editor(
                     st.session_state.custom_boq_data,
                     key=editor_key,
-                    num_rows="dynamic",
+                    num_rows="fixed" if is_land_extension else "dynamic",
+                    disabled=["Unit", "Rate"] if is_land_extension else False,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
@@ -1180,6 +1198,13 @@ if df_fact is not None and not df_fact.empty:
                         "Rate": st.column_config.NumberColumn("Rate", min_value=0.0, default=0.0)
                     }
                 )
+
+            # Enforce the official value again after the widget returns its data.
+            # This is the final guard before totals and webhook payloads are created.
+            if is_land_extension:
+                edited_df = edited_df.copy()
+                edited_df['Unit'] = 'M2'
+                edited_df['Rate'] = LAND_EXTENSION_RATE
 
             final_df = edited_df.copy()
             final_df['QTY'] = pd.to_numeric(final_df['QTY'], errors='coerce').fillna(0.0)
