@@ -869,7 +869,7 @@ if df_fact is not None and not df_fact.empty:
                     'Description': 'Required Fees for Adding land extension area of for a/m unit as per attached Drawings.',
                     'Unit': 'M2',
                     'QTY': 0.0,
-                    'Rate': 65000.0
+                    'Rate': 55000.0
                 }]
             elif selected_request_type == "Pergola":
                 initial_data = [{
