@@ -41,6 +41,8 @@ FURNITURE_RATES = {
     "OUTDOORS - P2": 64153.21
 }
 
+LAND_EXTENSION_RATES = (55000.0, 65000.0)
+
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
@@ -860,7 +862,15 @@ if df_fact is not None and not df_fact.empty:
             }
         }
 
-        LAND_EXTENSION_RATE = 55000.0
+        if selected_request_type == "Land Extension":
+            LAND_EXTENSION_RATE = st.selectbox(
+                "Select Land Extension Rate (EGP/m²)",
+                options=LAND_EXTENSION_RATES,
+                format_func=lambda rate: f"EGP {rate:,.0f} / m²",
+                key="land_extension_rate",
+            )
+        else:
+            LAND_EXTENSION_RATE = LAND_EXTENSION_RATES[0]
 
         # Reset the custom editor cleanly whenever the request type changes.
         # The versioned widget key prevents Streamlit from restoring stale editor state
@@ -1455,6 +1465,9 @@ if df_fact is not None and not df_fact.empty:
                             ),
                             "items": []
                         }
+
+                        if selected_request_type == "Land Extension":
+                            payload["landExtensionRate"] = float(LAND_EXTENSION_RATE)
                         
                         for item in st.session_state.staged_items:
                             payload["items"].append({
