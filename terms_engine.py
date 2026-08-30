@@ -20,6 +20,16 @@ PRE_CONSTRUCTION_EXTENSION = (
     "by ({months}) Months."
 )
 
+UNIT_CODES_USING_MASTER_DELIVERY_DEFAULT = ("RV", "RA", "QA")
+
+
+def resolve_delivery_stage_for_unit(unit_id: object, master_default: str) -> str:
+    """Apply the unit-based default while keeping the UI value editable."""
+    normalized_unit_id = str(unit_id or "").upper()
+    if any(code in normalized_unit_id for code in UNIT_CODES_USING_MASTER_DELIVERY_DEFAULT):
+        return master_default
+    return "Pre-Construction"
+
 
 @dataclass
 class TermsDefaults:
