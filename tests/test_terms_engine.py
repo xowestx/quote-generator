@@ -6,6 +6,7 @@ from terms_engine import (
     generate_terms,
     number_to_words,
     parse_terms_defaults,
+    resolve_delivery_stage_for_unit,
     validate_terms_values,
 )
 
@@ -47,6 +48,21 @@ class TermsEngineTests(unittest.TestCase):
         self.assertEqual(defaults.offer_validity_days, 7)
         self.assertEqual(defaults.duration_months, 4)
         self.assertEqual(warnings, [])
+
+    def test_unit_id_controls_delivery_stage_default(self):
+        self.assertEqual(
+            resolve_delivery_stage_for_unit("OW/HV1-4D", "Post-Delivery"),
+            "Pre-Construction",
+        )
+        self.assertEqual(
+            resolve_delivery_stage_for_unit("OW/QV1-32-VB", "Post-Delivery"),
+            "Pre-Construction",
+        )
+        for unit_id in ("OW/RV2-30-VB", "OW/RA4-50-4-14", "OW/QA1-1"):
+            self.assertEqual(
+                resolve_delivery_stage_for_unit(unit_id, "Post-Delivery"),
+                "Post-Delivery",
+            )
 
     def test_acceptance_example_monthly(self):
         terms, values = self.build(
