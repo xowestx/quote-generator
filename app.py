@@ -9,7 +9,12 @@ import base64
 import io
 import time
 
-from terms_engine import generate_terms, parse_terms_defaults, validate_terms_values
+from terms_engine import (
+    generate_terms,
+    parse_terms_defaults,
+    resolve_delivery_stage_for_unit,
+    validate_terms_values,
+)
 
 # Import PDF Merger
 try:
@@ -1275,7 +1280,10 @@ if df_fact is not None and not df_fact.empty:
         if st.session_state.get("terms_context_key") != terms_context_key:
             defaults, extraction_warnings = parse_terms_defaults(default_terms_text)
             st.session_state.terms_context_key = terms_context_key
-            st.session_state.qt_delivery_stage = defaults.delivery_stage
+            st.session_state.qt_delivery_stage = resolve_delivery_stage_for_unit(
+                selected_unit,
+                defaults.delivery_stage,
+            )
             st.session_state.qt_duration_months = defaults.duration_months
             st.session_state.qt_payment_method = defaults.payment_method
             st.session_state.qt_custom_payment_method = defaults.custom_payment_method
