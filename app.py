@@ -12,7 +12,6 @@ import time
 from terms_engine import (
     generate_terms,
     parse_terms_defaults,
-    resolve_delivery_stage_for_unit,
     validate_terms_values,
 )
 
@@ -1280,9 +1279,11 @@ if df_fact is not None and not df_fact.empty:
         if st.session_state.get("terms_context_key") != terms_context_key:
             defaults, extraction_warnings = parse_terms_defaults(default_terms_text)
             st.session_state.terms_context_key = terms_context_key
-            st.session_state.qt_delivery_stage = resolve_delivery_stage_for_unit(
-                selected_unit,
-                defaults.delivery_stage,
+            normalized_unit_id = str(selected_unit or "").upper()
+            st.session_state.qt_delivery_stage = (
+                defaults.delivery_stage
+                if any(code in normalized_unit_id for code in ("RV", "RA", "QA"))
+                else "Pre-Construction"
             )
             st.session_state.qt_duration_months = defaults.duration_months
             st.session_state.qt_payment_method = defaults.payment_method
@@ -1313,32 +1314,16 @@ if df_fact is not None and not df_fact.empty:
                 for warning in extraction_warnings:
                     st.warning(warning)
 
-        term_col1, term_col2, term_col3 = st.columns(3)
-        with term_col1:
-            st.selectbox(
-                "Delivery Stage",
-                ["Pre-Construction", "Post-Delivery"],
-                key="qt_delivery_stage",
-            )
-            st.number_input(
-                "Duration / Handover Extension (Months)",
-                min_value=0,
-                step=1,
-                key="qt_duration_months",
-            )
-            st.selectbox(
-                "Payment Method",
-                ["Post-Dated Cheques", "Bank Transfer", "Other"],
-                key="qt_payment_method",
-            )
-            if st.session_state.qt_payment_method == "Other":
-                st.text_input(
-                    "Other Payment Method",
-                    max_chars=80,
-                    key="qt_custom_payment_method",
-                )
+        # Row 1: Delivery stage only.
+        st.selectbox(
+            "Delivery Stage",
+            ["Pre-Construction", "Post-Delivery"],
+            key="qt_delivery_stage",
+        )
 
-        with term_col2:
+        # Row 2: Only the editable payment-plan factors.
+        payment_col1, payment_col2, payment_col3 = st.columns(3)
+        with payment_col1:
             st.number_input(
                 "Down Payment (%)",
                 min_value=0.0,
@@ -1346,37 +1331,27 @@ if df_fact is not None and not df_fact.empty:
                 step=0.5,
                 key="qt_down_payment",
             )
-            st.selectbox(
-                "Down-Payment Due Event",
-                ["Upon Approval", "Upon Signing", "Before Start of Work", "Custom"],
-                key="qt_due_event",
-            )
-            if st.session_state.qt_due_event == "Custom":
-                st.text_input(
-                    "Custom Due Event",
-                    max_chars=120,
-                    key="qt_custom_due_event",
-                )
-
-        with term_col3:
+        with payment_col2:
             st.number_input(
                 "Payment Term (Months)",
                 min_value=1,
                 step=1,
                 key="qt_payment_term_months",
             )
+        with payment_col3:
             st.selectbox(
                 "Installment Frequency",
                 ["Monthly", "Quarterly"],
                 key="qt_frequency",
             )
-            st.number_input(
-                "Offer Validity (Days)",
-                min_value=1,
-                max_value=365,
-                step=1,
-                key="qt_validity_days",
-            )
+
+        # Row 3: Duration / handover extension only.
+        st.number_input(
+            "Duration / Handover Extension (Months)",
+            min_value=0,
+            step=1,
+            key="qt_duration_months",
+        )
 
         validation_errors = validate_terms_values(
             st.session_state.qt_duration_months,
