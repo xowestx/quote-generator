@@ -1285,7 +1285,13 @@ if df_fact is not None and not df_fact.empty:
                 if any(code in normalized_unit_id for code in ("RV", "RA", "QA"))
                 else "Pre-Construction"
             )
-            st.session_state.qt_duration_months = defaults.duration_months
+            st.session_state.qt_master_duration_months = defaults.duration_months
+            st.session_state.qt_duration_months = (
+                6
+                if st.session_state.qt_delivery_stage == "Pre-Construction"
+                else defaults.duration_months
+            )
+            st.session_state.qt_last_delivery_stage = st.session_state.qt_delivery_stage
             st.session_state.qt_payment_method = defaults.payment_method
             st.session_state.qt_custom_payment_method = defaults.custom_payment_method
             st.session_state.qt_down_payment = defaults.down_payment_percent
@@ -1320,6 +1326,17 @@ if df_fact is not None and not df_fact.empty:
             ["Pre-Construction", "Post-Delivery"],
             key="qt_delivery_stage",
         )
+
+        # Apply the stage-specific default only when the stage changes. The user
+        # can still edit the duration after the default is applied.
+        current_delivery_stage = st.session_state.qt_delivery_stage
+        if st.session_state.get("qt_last_delivery_stage") != current_delivery_stage:
+            st.session_state.qt_duration_months = (
+                6
+                if current_delivery_stage == "Pre-Construction"
+                else st.session_state.get("qt_master_duration_months", 0)
+            )
+            st.session_state.qt_last_delivery_stage = current_delivery_stage
 
         # Row 2: Only the editable payment-plan factors.
         payment_col1, payment_col2, payment_col3 = st.columns(3)
