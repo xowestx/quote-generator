@@ -94,6 +94,9 @@ class FurnitureConfigurationTests(unittest.TestCase):
         self.assertIn('payload.requestCategory || ""', self.script_source)
         self.assertIn('const exactBaseKey = String(item.baseKey || "")', self.script_source)
         self.assertIn("P[123]", self.script_source)
+        self.assertIn("searchName = exactBaseKey;", self.script_source)
+        self.assertNotIn('.replace("DINING ROOM", "DINING")', self.script_source)
+        self.assertIn("missingRoomPdfs", self.script_source)
 
 
 if __name__ == "__main__":
