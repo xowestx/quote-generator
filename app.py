@@ -1719,6 +1719,16 @@ if df_fact is not None and not df_fact.empty:
                                     else:
                                         # Furniture 2-step: merge the quotation with
                                         # the exact selected room-design PDFs.
+                                        missing_room_pdfs = response_data.get(
+                                            "missingRoomPdfs", []
+                                        )
+                                        if missing_room_pdfs:
+                                            st.warning(
+                                                "Quotation created, but these furniture "
+                                                "design PDFs are missing from the Drive "
+                                                "folder: "
+                                                + ", ".join(missing_room_pdfs)
+                                            )
                                         merged_pdf = merge_pdf_base64(
                                             response_data["docBase64"],
                                             response_data.get("roomBase64s", []),
