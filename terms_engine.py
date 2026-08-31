@@ -17,7 +17,7 @@ PRE_CONSTRUCTION_START = (
 )
 PRE_CONSTRUCTION_EXTENSION = (
     "The items included in this quotation shall extend the unit handover date "
-    "by ({months}) Months."
+    "by {months_words} ({months}) {month_unit}."
 )
 
 UNIT_CODES_USING_MASTER_DELIVERY_DEFAULT = ("RV", "RA", "QA")
@@ -54,9 +54,9 @@ def _clean_number(value: float) -> str:
 
 
 def number_to_words(value: int) -> str:
-    """Convert an integer from 1 through 365 to lowercase English words."""
-    if not isinstance(value, int) or not 1 <= value <= 365:
-        raise ValueError("Offer validity must be a whole number from 1 to 365.")
+    """Convert an integer from 0 through 999,999 to lowercase English words."""
+    if not isinstance(value, int) or not 0 <= value < 1_000_000:
+        raise ValueError("Number must be a whole number from 0 through 999,999.")
 
     ones = [
         "zero", "one", "two", "three", "four", "five", "six", "seven",
@@ -72,9 +72,30 @@ def number_to_words(value: int) -> str:
 
     if value < 100:
         return under_hundred(value)
+    if value < 1_000:
+        return (
+            f"{ones[value // 100]} hundred"
+            + (f" {under_hundred(value % 100)}" if value % 100 else "")
+        )
+
+    thousands, remainder = divmod(value, 1_000)
     return (
-        f"{ones[value // 100]} hundred"
-        + (f" {under_hundred(value % 100)}" if value % 100 else "")
+        f"{number_to_words(thousands)} thousand"
+        + (f" {number_to_words(remainder)}" if remainder else "")
+    )
+
+
+def _format_number_with_digits(value: int) -> str:
+    """Return one synchronized written-and-numeric value."""
+    return f"{number_to_words(int(value))} ({int(value)})"
+
+
+def _format_preconstruction_extension(duration_months: int) -> str:
+    months = int(duration_months)
+    return PRE_CONSTRUCTION_EXTENSION.format(
+        months_words=number_to_words(months),
+        months=months,
+        month_unit="month" if months == 1 else "months",
     )
 
 
@@ -214,15 +235,25 @@ def _is_end_date(line: str) -> bool:
 
 def _replace_post_delivery_duration(line: str, duration_months: int) -> str:
     days = int(duration_months) * 30
-    if re.search(r"\(\d+\)\s+calendar\s+days", line, re.IGNORECASE):
+    duration_text = _format_number_with_digits(days)
+    duration_pattern = (
+        r"(\bshall\s+be\s+)"
+        r"(?:(?:[a-z]+(?:-[a-z]+)?)[ \t]+)*"
+        r"\(\d+\)"
+        r"(\s+calendar\s+days)"
+    )
+    if re.search(duration_pattern, line, re.IGNORECASE):
         return re.sub(
-            r"\(\d+\)(\s+calendar\s+days)",
-            rf"({days})\1",
+            duration_pattern,
+            lambda match: f"{match.group(1)}{duration_text}{match.group(2)}",
             line,
             count=1,
             flags=re.IGNORECASE,
         )
-    return f"End Date: The project completion date shall be ({days}) calendar days from the start date."
+    return (
+        "End Date: The project completion date shall be "
+        f"{duration_text} calendar days from the start date."
+    )
 
 
 def generate_terms(
@@ -306,7 +337,7 @@ def generate_terms(
             if not duration_inserted:
                 output.extend([
                     PRE_CONSTRUCTION_START,
-                    PRE_CONSTRUCTION_EXTENSION.format(months=int(duration_months)),
+                    _format_preconstruction_extension(int(duration_months)),
                 ])
                 duration_inserted = True
             continue
@@ -327,12 +358,13 @@ def generate_terms(
         duration_lines = (
             [
                 PRE_CONSTRUCTION_START,
-                PRE_CONSTRUCTION_EXTENSION.format(months=int(duration_months)),
+                _format_preconstruction_extension(int(duration_months)),
             ]
             if delivery_stage == "Pre-Construction"
             else [
-                f"End Date: The project completion date shall be "
-                f"({int(duration_months) * 30}) calendar days from the start date."
+                "End Date: The project completion date shall be "
+                f"{_format_number_with_digits(int(duration_months) * 30)} "
+                "calendar days from the start date."
             ]
         )
         validity_index = next((i for i, line in enumerate(output) if _is_validity(line)), -1)
