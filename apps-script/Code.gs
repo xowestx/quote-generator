@@ -665,11 +665,14 @@ function doPost(e) {
     const reqTypeStr = payload.requestType ? payload.requestType.toString().toUpperCase().trim() : "";
     const isLandExtension = reqTypeStr.includes("LAND EXTENSION");
     
-    // Checking if the request starts with a number followed by "BEDROOM"
-    const isBedroomPackage = /^\d+\s+BEDROOM/.test(reqTypeStr);
+    // Streamlit identifies Furniture explicitly so custom Option O quotations
+    // use the correct template and folders even when the name does not start
+    // with "1 Bedroom", "2 Bedrooms", etc.
+    const isFurniture = String(payload.requestCategory || "").toUpperCase() === "FURNITURE"
+      || /^\d+\s+BEDROOM/.test(reqTypeStr);
 
-    const destFolderId = isBedroomPackage ? CONFIG.FURNITURE_DOC_FOLDER_ID : CONFIG.DESTINATION_FOLDER_ID;
-    const pdfFolderId = isBedroomPackage ? CONFIG.FURNITURE_PDF_FOLDER_ID : CONFIG.PDF_DESTINATION_FOLDER_ID;
+    const destFolderId = isFurniture ? CONFIG.FURNITURE_DOC_FOLDER_ID : CONFIG.DESTINATION_FOLDER_ID;
+    const pdfFolderId = isFurniture ? CONFIG.FURNITURE_PDF_FOLDER_ID : CONFIG.PDF_DESTINATION_FOLDER_ID;
 
     const destFolder = DriveApp.getFolderById(destFolderId);
     const pdfFolder = DriveApp.getFolderById(pdfFolderId);
@@ -712,6 +715,7 @@ function doPost(e) {
       unit: item.unit,
       qty: item.qty,
       rate: item.rate,
+      baseKey: item.baseKey || "",
       total: (Number(item.qty) || 0) * (Number(item.rate) || 0)
     }));
 
@@ -788,7 +792,7 @@ function doPost(e) {
     // Dynamic Template Selection
     let templateId = CONFIG.TEMPLATE_ID;
     if (isLandExtension) templateId = CONFIG.LAND_EXTENSION_TEMPLATE_ID;
-    if (isBedroomPackage) templateId = CONFIG.FURNITURE_TEMPLATE_ID;
+    if (isFurniture) templateId = CONFIG.FURNITURE_TEMPLATE_ID;
 
     const templateFile = DriveApp.getFileById(templateId);
     
@@ -901,21 +905,33 @@ function doPost(e) {
       
       payload.items.forEach(item => {
         const descUpper = String(item.description).toUpperCase();
+        const exactBaseKey = String(item.baseKey || "").toUpperCase().trim();
         let searchName = "";
         
-        if (descUpper.includes("NANNY")) {
+        // Prefer the exact per-room P1/P2/P3 design selected in Streamlit.
+        // Kitchen, Closets and AC keys intentionally have no room-design PDF.
+        if (/^(RECEPTION|DINING ROOM|TERRACE|OUTDOORS|MASTER BEDROOM|KIDS BEDROOM|LIVING ROOM) - P[123]$/.test(exactBaseKey)) {
+          searchName = exactBaseKey
+            .replace("DINING ROOM", "DINING")
+            .replace("LIVING ROOM", "LIVING");
+        } else if (exactBaseKey === "NANNY'S ROOM") {
           searchName = "NANNY";
-        } else {
-          if (descUpper.includes("RECEPTION")) searchName = "RECEPTION";
-          else if (descUpper.includes("DINING")) searchName = "DINING";
-          else if (descUpper.includes("TERRACE")) searchName = "TERRACE";
-          else if (descUpper.includes("OUTDOORS")) searchName = "OUTDOORS";
-          else if (descUpper.includes("MASTER BEDROOM")) searchName = "MASTER BEDROOM";
-          else if (descUpper.includes("KIDS BEDROOM")) searchName = "KIDS BEDROOM";
-          else if (descUpper.includes("LIVING")) searchName = "LIVING";
-          
-          if (searchName && payload.packageCode) {
-            searchName = `${searchName} - ${payload.packageCode}`;
+        } else if (!exactBaseKey) {
+          // Backward-compatible fallback for older Streamlit payloads.
+          if (descUpper.includes("NANNY")) {
+            searchName = "NANNY";
+          } else {
+            if (descUpper.includes("RECEPTION")) searchName = "RECEPTION";
+            else if (descUpper.includes("DINING")) searchName = "DINING";
+            else if (descUpper.includes("TERRACE")) searchName = "TERRACE";
+            else if (descUpper.includes("OUTDOORS")) searchName = "OUTDOORS";
+            else if (descUpper.includes("MASTER BEDROOM")) searchName = "MASTER BEDROOM";
+            else if (descUpper.includes("KIDS BEDROOM")) searchName = "KIDS BEDROOM";
+            else if (descUpper.includes("LIVING")) searchName = "LIVING";
+            
+            if (searchName && payload.packageCode) {
+              searchName = `${searchName} - ${payload.packageCode}`;
+            }
           }
         }
         
