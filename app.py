@@ -17,10 +17,29 @@ from terms_engine import (
 
 # Import PDF Merger
 try:
-    from pypdf import PdfWriter
+    from pypdf import PdfReader, PdfWriter
     has_pypdf = True
 except ImportError:
     has_pypdf = False
+
+
+def merge_pdf_base64(primary_pdf_base64, supplemental_pdf_base64s):
+    """Append selected furniture design PDFs to the quotation PDF."""
+    supplemental_pdf_base64s = [
+        pdf_data for pdf_data in (supplemental_pdf_base64s or []) if pdf_data
+    ]
+    if not has_pypdf or not supplemental_pdf_base64s:
+        return primary_pdf_base64
+
+    writer = PdfWriter()
+    for encoded_pdf in [primary_pdf_base64] + supplemental_pdf_base64s:
+        reader = PdfReader(io.BytesIO(base64.b64decode(encoded_pdf)))
+        for page in reader.pages:
+            writer.add_page(page)
+
+    output = io.BytesIO()
+    writer.write(output)
+    return base64.b64encode(output.getvalue()).decode("ascii")
 
 # Verified Room-by-Room Furniture Rate Mapping (As per Rates Tab Option "O")
 FURNITURE_RATES = {
@@ -43,6 +62,38 @@ FURNITURE_RATES = {
     "TERRACE - P3": 9803.42,
     "OUTDOORS - P1": 49704.38,
     "OUTDOORS - P2": 64153.21
+}
+
+# P1/P2/P3 are design options. L/D/R are package tiers. The correct design
+# code differs by room, so it must travel with each quotation item.
+FURNITURE_PACKAGE_DESIGNS = {
+    "L": {
+        "RECEPTION": "RECEPTION - P1",
+        "LIVING ROOM": "LIVING ROOM - P1",
+        "DINING ROOM": "DINING ROOM - P2",
+        "MASTER BEDROOM": "MASTER BEDROOM - P1",
+        "KIDS BEDROOM": "KIDS BEDROOM - P1",
+        "TERRACE": "TERRACE - P1",
+        "OUTDOORS": "OUTDOORS - P2",
+    },
+    "D": {
+        "RECEPTION": "RECEPTION - P2",
+        "LIVING ROOM": "LIVING ROOM - P2",
+        "DINING ROOM": "DINING ROOM - P1",
+        "MASTER BEDROOM": "MASTER BEDROOM - P3",
+        "KIDS BEDROOM": "KIDS BEDROOM - P2",
+        "TERRACE": "TERRACE - P2",
+        "OUTDOORS": "OUTDOORS - P1",
+    },
+    "R": {
+        "RECEPTION": "RECEPTION - P3",
+        "LIVING ROOM": "LIVING ROOM - P3",
+        "DINING ROOM": "DINING ROOM - P3",
+        "MASTER BEDROOM": "MASTER BEDROOM - P2",
+        "KIDS BEDROOM": "KIDS BEDROOM - P3",
+        "TERRACE": "TERRACE - P3",
+        "OUTDOORS": "OUTDOORS - P3",
+    },
 }
 
 LAND_EXTENSION_RATES = (55000.0, 65000.0)
