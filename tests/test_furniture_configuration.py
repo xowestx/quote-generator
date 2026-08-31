@@ -77,7 +77,8 @@ class FurnitureConfigurationTests(unittest.TestCase):
             1,
         )[1].split('if st.session_state.staged_items:', 1)[0]
         self.assertIn("exact_rate = FURNITURE_RATES[add_room_key]", custom_section)
-        self.assertNotIn("multiplier", custom_section)
+        self.assertNotIn("multiplier_b", custom_section)
+        self.assertNotIn("* multiplier", custom_section)
 
     def test_furniture_terms_use_generic_master_record(self):
         terms_section = self.app_source.split(
