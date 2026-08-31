@@ -1470,7 +1470,7 @@ if df_fact is not None and not df_fact.empty:
     if st.session_state.staged_items:
         terms_lookup_name = selected_request_type
         if (
-            selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"]
+            selected_request_type in ["Roof Room", "Closing Double Height"]
             and "Lookup Name" in st.session_state.staged_items[0]
         ):
             terms_lookup_name = st.session_state.staged_items[0]["Lookup Name"]
@@ -1686,7 +1686,8 @@ if df_fact is not None and not df_fact.empty:
                                 "description": item.get("Description", ""),
                                 "unit": item.get("Unit", "LS"),
                                 "qty": item.get("QTY", 1.0),
-                                "rate": item.get("Rate", 0.0)
+                                "rate": item.get("Rate", 0.0),
+                                "baseKey": item.get("Base Key", ""),
                             })
                             
                         # Add packageCode and packageName to the payload for single Furniture exports so it triggers the Furniture template
@@ -1697,6 +1698,7 @@ if df_fact is not None and not df_fact.empty:
                             elif "[R]" in fur_package_name: pkg_code = "P3"
                             else: pkg_code = "P1"
                             payload["action"] = "generateDocOnly"
+                            payload["requestCategory"] = "Furniture"
                             payload["packageCode"] = pkg_code
                             payload["packageName"] = fur_package_name
                                 
@@ -1715,15 +1717,21 @@ if df_fact is not None and not df_fact.empty:
                                         st.session_state.pdf_url = response_data.get('pdfUrl')
                                         st.rerun()
                                     else:
-                                        # Furniture 2-step (No PDF merging)
+                                        # Furniture 2-step: merge the quotation with
+                                        # the exact selected room-design PDFs.
+                                        merged_pdf = merge_pdf_base64(
+                                            response_data["docBase64"],
+                                            response_data.get("roomBase64s", []),
+                                        )
                                         upload_payload = {
                                             "action": "uploadPdf",
+                                            "requestCategory": "Furniture",
                                             "docName": response_data["docName"],
-                                            "base64Pdf": response_data["docBase64"],
+                                            "base64Pdf": merged_pdf,
                                             "serialNumber": response_data["serialNumber"],
                                             "unitId": selected_unit,
                                             "clientName": final_client_name,
-                                            "requestType": resolved_req_name, # Updated to match Typology
+                                            "requestType": resolved_req_name,
                                             "grandTotal": response_data["grandTotal"],
                                             "zone": str(zone_name)
                                         }
