@@ -902,6 +902,7 @@ function doPost(e) {
       const ROOM_PDF_FOLDER_ID = "1CRILRUeUpqwd4UplFXIVqVlFD4tcc631";
       const roomFolder = DriveApp.getFolderById(ROOM_PDF_FOLDER_ID);
       const roomBase64s = [];
+      const missingRoomPdfs = [];
       
       payload.items.forEach(item => {
         const descUpper = String(item.description).toUpperCase();
@@ -911,9 +912,7 @@ function doPost(e) {
         // Prefer the exact per-room P1/P2/P3 design selected in Streamlit.
         // Kitchen, Closets and AC keys intentionally have no room-design PDF.
         if (/^(RECEPTION|DINING ROOM|TERRACE|OUTDOORS|MASTER BEDROOM|KIDS BEDROOM|LIVING ROOM) - P[123]$/.test(exactBaseKey)) {
-          searchName = exactBaseKey
-            .replace("DINING ROOM", "DINING")
-            .replace("LIVING ROOM", "LIVING");
+          searchName = exactBaseKey;
         } else if (exactBaseKey === "NANNY'S ROOM") {
           searchName = "NANNY";
         } else if (!exactBaseKey) {
@@ -940,6 +939,8 @@ function doPost(e) {
           if (files.hasNext()) {
             const file = files.next();
             roomBase64s.push(Utilities.base64Encode(file.getBlob().getBytes()));
+          } else {
+            missingRoomPdfs.push(searchName);
           }
         }
       });
@@ -953,6 +954,7 @@ function doPost(e) {
         docName: `${docName}.pdf`,
         docBase64: docBase64,
         roomBase64s: roomBase64s,
+        missingRoomPdfs: missingRoomPdfs,
         serialNumber: serialNumber,
         grandTotal: grandTotal
       })).setMimeType(ContentService.MimeType.JSON);
