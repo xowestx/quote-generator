@@ -75,7 +75,14 @@ class TermsEngineTests(unittest.TestCase):
         self.assertIn("60% over 24 equal monthly installments through post-dated cheques.", terms)
         self.assertIn("seven (7) days", terms)
         self.assertIn(PRE_CONSTRUCTION_START, terms)
-        self.assertIn(PRE_CONSTRUCTION_EXTENSION.format(months=6), terms)
+        self.assertIn(
+            PRE_CONSTRUCTION_EXTENSION.format(
+                months_words="six",
+                months=6,
+                month_unit="months",
+            ),
+            terms,
+        )
         self.assertEqual(values["calculatedInstallmentCount"], 24)
         self.assertEqual(values["calculatedRemainingBalancePercent"], 60)
 
@@ -96,8 +103,9 @@ class TermsEngineTests(unittest.TestCase):
     def test_post_delivery_preserves_wording_and_updates_days(self):
         terms, _ = self.build(duration_months=6)
         self.assertIn(
-            "End Date: The project completion date shall be (180) calendar days "
-            "from the start date, considering the construction sequence",
+            "End Date: The project completion date shall be "
+            "one hundred eighty (180) calendar days from the start date, "
+            "considering the construction sequence",
             terms,
         )
         self.assertIn(
@@ -105,6 +113,28 @@ class TermsEngineTests(unittest.TestCase):
             "following the payment date.",
             terms,
         )
+
+    def test_post_delivery_replaces_stale_written_duration(self):
+        stale_terms = SAMPLE_TERMS.replace(
+            "shall be (120) calendar days",
+            "shall be twenty-one (21) calendar days",
+        )
+        terms, _ = generate_terms(
+            stale_terms,
+            delivery_stage="Post-Delivery",
+            duration_months=6,
+            payment_method="Post-Dated Cheques",
+            custom_payment_method="",
+            down_payment_percent=40,
+            due_event="Upon Approval",
+            custom_due_event="",
+            payment_term_months=24,
+            installment_frequency="Monthly",
+            offer_validity_days=7,
+        )
+        self.assertIn("one hundred eighty (180) calendar days", terms)
+        self.assertNotIn("twenty-one (180)", terms)
+        self.assertNotIn("twenty-one (21)", terms)
 
     def test_unrelated_terms_are_preserved_and_clauses_not_duplicated(self):
         terms, _ = self.build(down_payment_percent=30, payment_term_months=6)
@@ -117,11 +147,14 @@ class TermsEngineTests(unittest.TestCase):
         self.assertIn("Quarterly payment terms must be divisible by 3.", errors)
 
     def test_number_to_words_range(self):
+        self.assertEqual(number_to_words(0), "zero")
         self.assertEqual(number_to_words(1), "one")
         self.assertEqual(number_to_words(21), "twenty-one")
-        self.assertEqual(number_to_words(365), "three hundred sixty-five")
+        self.assertEqual(number_to_words(180), "one hundred eighty")
+        self.assertEqual(number_to_words(360), "three hundred sixty")
+        self.assertEqual(number_to_words(720), "seven hundred twenty")
         with self.assertRaises(ValueError):
-            number_to_words(366)
+            number_to_words(1_000_000)
 
 
 if __name__ == "__main__":
