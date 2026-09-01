@@ -70,62 +70,88 @@ class FurnitureConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(exact_price, self.furniture_section)
 
-    def test_room_options_use_checkbox_quantity_table(self):
-        for required_text in (
-            '"Add": False',
-            '"Furniture Option"',
-            '"QTY"',
-            '"Rate (EGP)"',
-            "CheckboxColumn",
-            "Add Selected Items to Quotation",
-        ):
-            self.assertIn(required_text, self.furniture_section)
-        self.assertNotIn("Select Furniture Package", self.furniture_section)
-        self.assertNotIn("Populate Package", self.furniture_section)
-
-    def test_typology_filters_applicable_rooms(self):
-        for required_room in (
-            '"RECEPTION"',
-            '"DINING ROOM"',
-            '"MASTER BEDROOM"',
-            '"KIDS BEDROOM"',
-            '"NANNY\'S ROOM"',
-            '"LIVING ROOM"',
-            '"TERRACE"',
-            '"OUTDOORS"',
-        ):
-            self.assertIn(required_room, self.furniture_section)
-        self.assertIn('if num_beds > 1:', self.furniture_section)
-        self.assertIn('if "+N" in fur_unit_type:', self.furniture_section)
-        self.assertIn('if "+F" in fur_unit_type:', self.furniture_section)
-
-    def test_room_prices_are_direct_and_not_package_scaled(self):
+    def test_level_is_selected_before_method(self):
+        level_position = self.furniture_section.index(
+            'st.markdown("##### 1. Furniture Level")'
+        )
+        method_position = self.furniture_section.index(
+            'st.markdown("##### 2. Selection Method")'
+        )
+        self.assertLess(level_position, method_position)
         self.assertIn(
-            'float(FURNITURE_RATES[rate_key])',
+            '["Luxury [L]", "Deluxe [D]", "Rent [R]"]',
             self.furniture_section,
         )
-        self.assertNotIn("* multiplier", self.furniture_section)
-        self.assertNotIn("build_furniture_package", self.furniture_section)
+        self.assertIn(
+            '["Full Package", "Select Rooms Individually"]',
+            self.furniture_section,
+        )
 
-    def test_optional_items_use_same_check_and_quantity_pattern(self):
+    def test_confirmed_level_multipliers_apply_to_rooms(self):
+        for expected in (
+            '1.0 if level_code == "L"',
+            'else 0.7 if level_code == "D"',
+            'else 0.35',
+            '* level_multiplier',
+        ):
+            self.assertIn(expected, self.furniture_section)
+
+    def test_full_package_and_individual_room_paths_exist(self):
+        self.assertIn(
+            'if selection_method == "Full Package":',
+            self.furniture_section,
+        )
+        self.assertIn("Full Package Preview", self.furniture_section)
+        self.assertIn("Room-by-Room Selection", self.furniture_section)
+        self.assertIn("room_option_keys", self.furniture_section)
+
+    def test_each_room_has_one_option_selector(self):
+        self.assertIn(
+            'selected_rate_key = st.selectbox(',
+            self.furniture_section,
+        )
+        self.assertIn(
+            "Each room has one option selector",
+            self.furniture_section,
+        )
+        self.assertNotIn("CheckboxColumn", self.furniture_section)
+
+    def test_duplicate_rooms_are_blocked_by_room_key(self):
+        self.assertIn(
+            '"Pricing Key": f"ROOM|{room_name.upper()}"',
+            self.furniture_section,
+        )
+        self.assertIn("existing_keys", self.furniture_section)
+        self.assertIn("Duplicate selection blocked", self.furniture_section)
+        self.assertIn("seen_pricing_keys", self.furniture_section)
+
+    def test_optional_section_is_separate_and_level_priced(self):
         self.assertIn(
             "Optional Kitchen, Closets & Air Conditioning",
             self.furniture_section,
         )
         for label in (
-            "KITCHEN",
-            "MASTER BEDROOM CLOSETS",
-            "RECEPTION AC 3 HP",
-            "BEDROOM AC 1.5 HP",
+            "Kitchen",
+            "Master Bedroom Closets",
+            "Kids Bedroom Closets",
+            "Nanny's Room Closet",
+            "Reception AC 3 HP",
+            "Bedroom AC 1.5 HP",
         ):
             self.assertIn(label, self.furniture_section)
 
-    def test_duplicate_pricing_keys_are_not_added_twice(self):
-        self.assertIn("existing_keys", self.furniture_section)
-        self.assertIn(
-            'if item["Pricing Key"] in existing_keys:',
-            self.furniture_section,
-        )
+    def test_results_have_required_column_order(self):
+        required_order = '''result_columns = [
+                "No.",
+                "Level",
+                "Room",
+                "Option",
+                "Description",
+                "Unit",
+                "QTY",
+                "Rate",
+                "Total Amount",'''
+        self.assertIn(required_order, self.furniture_section)
 
     def test_streamlit_ignores_design_pdf_workflow(self):
         for forbidden_text in (
