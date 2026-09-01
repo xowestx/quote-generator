@@ -669,28 +669,6 @@ if df_fact is not None and not df_fact.empty:
             st.rerun()
 
         if st.session_state.staged_items:
-                    lookup_name = st.session_state.staged_items[0].get(
-                        "Lookup Name", lookup_name
-                    )
-                description = (
-                    f"Supply and install Furniture for {clean_room_name} as per "
-                    "attached design, including Curtains, rugs, cushions, bed linens, "
-                    "table lamps, pendant lights, and mattresses."
-                )
-                st.session_state.staged_items.append({
-                    "No.": len(st.session_state.staged_items) + 1,
-                    "Description": description,
-                    "Unit": "LS",
-                    "QTY": float(add_room_qty),
-                    "Rate": exact_rate,
-                    "Total Amount": float(add_room_qty) * exact_rate,
-                    "Lookup Name": lookup_name,
-                    "Multiplier": 1.0,
-                    "Pricing Mode": "Custom Option O",
-                })
-                st.rerun()
-
-        if st.session_state.staged_items:
             st.markdown("### 📊 Active Furniture Quotation")
             st.info(
                 "Edit quantities or delete unwanted rows. Rates are locked."
