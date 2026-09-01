@@ -5,7 +5,6 @@ from fpdf import FPDF
 import re
 import requests
 import json
-import time
 
 from terms_engine import (
     generate_terms,
@@ -13,7 +12,7 @@ from terms_engine import (
     validate_terms_values,
 )
 
-# Verified Room-by-Room Furniture Rate Mapping (As per Rates Tab Option "O")
+# Verified Room-by-Room Furniture Rate Mapping
 FURNITURE_RATES = {
     "RECEPTION - P1": 225193.10,
     "RECEPTION - P2": 204637.62,
@@ -404,274 +403,368 @@ if df_fact is not None and not df_fact.empty:
 
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Furniture Quotation Builder")
-        st.info(
-            "Select the L/D/R package and unit typology. Kitchen, Closets and Air "
-            "Conditioning can be included or excluded independently. Existing prices "
-            "and package calculations remain unchanged."
+        st.caption(
+            "Select the unit typology, check the required room options, confirm the "
+            "quantities, then add them to the quotation. No design PDFs are attached."
         )
 
-        if 'staged_items' not in st.session_state or not isinstance(
+        if st.session_state.get("furniture_ui_version") != "room_selection_v1":
+            st.session_state.furniture_ui_version = "room_selection_v1"
+            st.session_state.furniture_selection_revision = 0
+            st.session_state.staged_items = []
+
+        if "staged_items" not in st.session_state or not isinstance(
             st.session_state.staged_items, list
         ):
             st.session_state.staged_items = []
 
-        st.markdown("##### Optional Add-ons")
-        optional_col1, optional_col2, optional_col3 = st.columns(3)
-        with optional_col1:
-            include_furniture_kitchen = st.checkbox(
-                "Include Kitchen",
-                value=True,
-                key="include_furniture_kitchen",
-            )
-        with optional_col2:
-            include_furniture_closets = st.checkbox(
-                "Include Closets",
-                value=True,
-                key="include_furniture_closets",
-            )
-        with optional_col3:
-            include_furniture_ac = st.checkbox(
-                "Include Air Conditioning",
-                value=True,
-                key="include_furniture_ac",
-            )
-        st.caption(
-            "Optional selections are applied when you populate a preset or run bulk export."
+        fur_unit_type = st.selectbox(
+            "Select Unit Typology",
+            [
+                "1 Bedroom",
+                "2 Bedrooms",
+                "3 Bedrooms",
+                "3 Bedrooms+N",
+                "3 Bedrooms+N+F",
+                "4 Bedrooms+N",
+            ],
+        )
+        num_beds = int(fur_unit_type[0])
+        request_name = f"{fur_unit_type}, Furniture"
+
+        applicable_rooms = {
+            "RECEPTION",
+            "DINING ROOM",
+            "MASTER BEDROOM",
+            "TERRACE",
+            "OUTDOORS",
+        }
+        if num_beds > 1:
+            applicable_rooms.add("KIDS BEDROOM")
+        if "+N" in fur_unit_type:
+            applicable_rooms.add("NANNY'S ROOM")
+        if "+F" in fur_unit_type:
+            applicable_rooms.add("LIVING ROOM")
+
+        room_order = [
+            "RECEPTION",
+            "DINING ROOM",
+            "LIVING ROOM",
+            "MASTER BEDROOM",
+            "KIDS BEDROOM",
+            "NANNY'S ROOM",
+            "TERRACE",
+            "OUTDOORS",
+        ]
+        room_catalog = []
+        for room_name in room_order:
+            if room_name not in applicable_rooms:
+                continue
+            rate_keys = [
+                rate_key
+                for rate_key in FURNITURE_RATES
+                if rate_key == room_name
+                or rate_key.startswith(f"{room_name} - P")
+            ]
+            for rate_key in rate_keys:
+                default_qty = (
+                    float(num_beds - 1)
+                    if room_name == "KIDS BEDROOM"
+                    else 1.0
+                )
+                room_catalog.append({
+                    "Add": False,
+                    "Furniture Option": rate_key.replace(" - ", " "),
+                    "QTY": default_qty,
+                    "Rate (EGP)": float(FURNITURE_RATES[rate_key]),
+                    "Rate Key": rate_key,
+                })
+
+        st.markdown("##### Room Furniture Options")
+        selection_revision = st.session_state.get(
+            "furniture_selection_revision", 0
+        )
+        selected_room_options = st.data_editor(
+            pd.DataFrame(room_catalog),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            key=(
+                f"furniture_room_selector_{fur_unit_type}_"
+                f"{selection_revision}"
+            ),
+            column_config={
+                "Add": st.column_config.CheckboxColumn(
+                    "Add",
+                    help="Check every furniture option you want to add.",
+                    default=False,
+                ),
+                "Furniture Option": st.column_config.TextColumn(
+                    "Furniture Option",
+                    disabled=True,
+                ),
+                "QTY": st.column_config.NumberColumn(
+                    "QTY",
+                    min_value=1.0,
+                    step=1.0,
+                    disabled=False,
+                ),
+                "Rate (EGP)": st.column_config.NumberColumn(
+                    "Rate (EGP)",
+                    format="%.2f",
+                    disabled=True,
+                ),
+                "Rate Key": None,
+            },
+            disabled=["Furniture Option", "Rate (EGP)", "Rate Key"],
         )
 
-        def build_furniture_package(unit_type, package_label):
-            """Build one package while preserving every existing numeric price."""
-            package_code = (
-                "L" if "Luxury" in package_label
-                else "D" if "Deluxe" in package_label
+        with st.expander("Optional Kitchen, Closets & Air Conditioning"):
+            addon_finish = st.selectbox(
+                "Kitchen and Closets Finish",
+                ["Luxury [L]", "Deluxe [D]", "Rent [R]"],
+                key="furniture_addon_finish",
+            )
+            addon_code = (
+                "L" if "[L]" in addon_finish
+                else "D" if "[D]" in addon_finish
                 else "R"
             )
-            multiplier = (
-                1.0 if package_code == "L"
-                else 0.7 if package_code == "D"
-                else 0.35
+            addon_finish_name = (
+                "Luxury" if addon_code == "L"
+                else "Deluxe" if addon_code == "D"
+                else "Rent"
             )
-            num_beds = int(unit_type[0])
-            request_name = f"{unit_type}, {package_label}"
-            room_specs = [
-                {
-                    "desc": "Reception Room",
-                    "qty": 1.0,
-                    "rate_key": "RECEPTION - P1",
-                },
-                {
-                    "desc": "Dining Room",
-                    "qty": 1.0,
-                    "rate_key": "DINING ROOM - P2",
-                },
-                {
-                    "desc": "Terrace Area",
-                    "qty": 1.0,
-                    "rate_key": "TERRACE - P1",
-                },
-            ]
-            if "+N" in unit_type:
-                room_specs.append({
-                    "desc": "Nanny's Room",
-                    "qty": 1.0,
-                    "rate_key": "NANNY'S ROOM",
-                })
-            if "+F" in unit_type:
-                room_specs.append({
-                    "desc": "Living Room Area",
-                    "qty": 1.0,
-                    "rate_key": "LIVING ROOM - P1",
-                })
-            room_specs.append({
-                "desc": "Master Bedroom Area",
-                "qty": 1.0,
-                "rate_key": "MASTER BEDROOM - P1",
-                "design_group": "MASTER BEDROOM",
-            })
-            if num_beds > 1:
-                room_specs.append({
-                    "desc": "Kids Bedroom Area",
-                    "qty": float(num_beds - 1),
-                    "rate_key": "KIDS BEDROOM - P1",
-                })
+            kitchen_rate = (
+                354350.00 if addon_code == "L"
+                else 270050.00 if addon_code == "D"
+                else 185750.00
+            )
+            if addon_code == "L":
+                closet_description = (
+                    "Supply and install a wardrobe constructed from 'Good Wood' "
+                    "blockboard with an HPL finish and pressed blockboard boxes, "
+                    "fully fitted with hinged wooden doors and all necessary "
+                    "installation hardware. SIZE: 2800 X 2200 MM H"
+                )
+                closet_rate = 72800.00
+            elif addon_code == "D":
+                closet_description = (
+                    "Supply and install a wardrobe constructed from melamine-faced "
+                    "blockboard with pressed blockboard boxes, fully fitted with "
+                    "hinged wooden doors and all necessary installation hardware. "
+                    "SIZE: 2800 X 2200 MM H"
+                )
+                closet_rate = 72800.00 * 0.7
+            else:
+                closet_description = (
+                    "Supply and install a wardrobe constructed from melamine-faced "
+                    "chipboard with pressed blockboard boxes, fully fitted with "
+                    "hinged wooden doors and all necessary installation hardware. "
+                    "SIZE: 2800 X 2200 MM H"
+                )
+                closet_rate = 72800.00 * 0.5
 
-            package_items = []
-            for room in room_specs:
-                rate = FURNITURE_RATES[room["rate_key"]] * multiplier
-                description = (
-                    f"Supply and install Furniture for {room['desc']} as per attached "
-                    "design, including Curtains, rugs, cushions, bed linens, table "
-                    "lamps, pendant lights, and mattresses."
-                )
-                package_items.append({
-                    "No.": len(package_items) + 1,
-                    "Description": description,
-                    "Unit": "LS",
-                    "QTY": room["qty"],
-                    "Rate": rate,
-                    "Total Amount": room["qty"] * rate,
-                    "Lookup Name": request_name,
-                    "Multiplier": multiplier,
-                    "Pricing Mode": f"Package {package_code}",
-                })
-
-            if include_furniture_kitchen:
-                kitchen_finish = (
-                    "Luxury" if package_code == "L"
-                    else "Deluxe" if package_code == "D"
-                    else "Rent"
-                )
-                kitchen_rate = (
-                    354350.00 if package_code == "L"
-                    else 270050.00 if package_code == "D"
-                    else 185750.00
-                )
-                package_items.append({
-                    "No.": len(package_items) + 1,
+            addon_catalog = [
+                {
+                    "Add": False,
+                    "Optional Item": f"KITCHEN {addon_finish_name.upper()}",
+                    "QTY": 1.0,
+                    "Rate (EGP)": kitchen_rate,
                     "Description": (
-                        f"Supply and install kitchen with {kitchen_finish} finish as "
-                        "per approved sample and attached design."
+                        f"Supply and install kitchen with {addon_finish_name} finish "
+                        "as per approved sample and selected design."
                     ),
                     "Unit": "LS",
-                    "QTY": 1.0,
-                    "Rate": kitchen_rate,
-                    "Total Amount": kitchen_rate,
-                    "Lookup Name": request_name,
-                    "Multiplier": 1.0,
-                    "Pricing Mode": "Optional Kitchen",
-                })
-
-            if include_furniture_closets:
-                if package_code == "L":
-                    closet_description = (
-                        "Supply and install a wardrobe constructed from 'Good Wood' "
-                        "blockboard with an HPL finish and pressed blockboard boxes, "
-                        "fully fitted with hinged wooden doors and all necessary "
-                        "installation hardware. SIZE: 2800 X 2200 MM H"
-                    )
-                    closet_rate = 72800.00
-                elif package_code == "D":
-                    closet_description = (
-                        "Supply and install a wardrobe constructed from melamine-faced "
-                        "blockboard with pressed blockboard boxes, fully fitted with "
-                        "hinged wooden doors and all necessary installation hardware. "
-                        "SIZE: 2800 X 2200 MM H"
-                    )
-                    closet_rate = 72800.00 * 0.7
-                else:
-                    closet_description = (
-                        "Supply and install a wardrobe constructed from melamine-faced "
-                        "chipboard with pressed blockboard boxes, fully fitted with "
-                        "hinged wooden doors and all necessary installation hardware. "
-                        "SIZE: 2800 X 2200 MM H"
-                    )
-                    closet_rate = 72800.00 * 0.5
-
-                package_items.append({
-                    "No.": len(package_items) + 1,
-                    "Description": closet_description + " for Master Bedroom",
-                    "Unit": "NO.",
+                    "Pricing Key": f"KITCHEN-{addon_code}",
+                },
+                {
+                    "Add": False,
+                    "Optional Item": (
+                        f"MASTER BEDROOM CLOSETS {addon_finish_name.upper()}"
+                    ),
                     "QTY": 2.0,
-                    "Rate": closet_rate,
-                    "Total Amount": 2.0 * closet_rate,
-                    "Lookup Name": request_name,
-                    "Multiplier": 1.0,
-                    "Pricing Mode": "Optional Closets",
+                    "Rate (EGP)": closet_rate,
+                    "Description": (
+                        closet_description + " for Master Bedroom"
+                    ),
+                    "Unit": "NO.",
+                    "Pricing Key": f"CLOSETS-MASTER-{addon_code}",
+                },
+            ]
+            if num_beds > 1:
+                addon_catalog.append({
+                    "Add": False,
+                    "Optional Item": (
+                        f"KIDS BEDROOM CLOSETS {addon_finish_name.upper()}"
+                    ),
+                    "QTY": float(num_beds - 1),
+                    "Rate (EGP)": closet_rate,
+                    "Description": (
+                        closet_description + " for Kids Bedrooms"
+                    ),
+                    "Unit": "NO.",
+                    "Pricing Key": f"CLOSETS-KIDS-{addon_code}",
                 })
-                if num_beds > 1:
-                    kids_quantity = float(num_beds - 1)
-                    package_items.append({
-                        "No.": len(package_items) + 1,
-                        "Description": closet_description + " for Kids Bedrooms",
-                        "Unit": "NO.",
-                        "QTY": kids_quantity,
-                        "Rate": closet_rate,
-                        "Total Amount": kids_quantity * closet_rate,
-                        "Lookup Name": request_name,
-                        "Multiplier": 1.0,
-                        "Pricing Mode": "Optional Closets",
-                    })
-                if "+N" in unit_type:
-                    nanny_closet_rate = 22500.00
-                    package_items.append({
-                        "No.": len(package_items) + 1,
-                        "Description": (
-                            "Supply and install a wardrobe constructed from "
-                            "melamine-faced chipboard with pressed blockboard boxes, "
-                            "fully fitted with hinged wooden doors and all necessary "
-                            "installation hardware. SIZE: 2000 X 2200 MM H for "
-                            "Nanny's Room"
-                        ),
-                        "Unit": "NO.",
-                        "QTY": 1.0,
-                        "Rate": nanny_closet_rate,
-                        "Total Amount": nanny_closet_rate,
-                        "Lookup Name": request_name,
-                        "Multiplier": 1.0,
-                        "Pricing Mode": "Optional Closets",
-                    })
-
-            if include_furniture_ac:
-                package_items.append({
-                    "No.": len(package_items) + 1,
+            if "+N" in fur_unit_type:
+                addon_catalog.append({
+                    "Add": False,
+                    "Optional Item": "NANNY'S ROOM CLOSET",
+                    "QTY": 1.0,
+                    "Rate (EGP)": 22500.00,
+                    "Description": (
+                        "Supply and install a wardrobe constructed from "
+                        "melamine-faced chipboard with pressed blockboard boxes, "
+                        "fully fitted with hinged wooden doors and all necessary "
+                        "installation hardware. SIZE: 2000 X 2200 MM H for "
+                        "Nanny's Room"
+                    ),
+                    "Unit": "NO.",
+                    "Pricing Key": "CLOSETS-NANNY",
+                })
+            addon_catalog.extend([
+                {
+                    "Add": False,
+                    "Optional Item": "RECEPTION AC 3 HP",
+                    "QTY": 1.0,
+                    "Rate (EGP)": 60694.40,
                     "Description": (
                         "Supply and install 3 hp Carrier AC split unit for Reception, "
                         "including freon piping required."
                     ),
                     "Unit": "NO.",
-                    "QTY": 1.0,
-                    "Rate": 60694.40,
-                    "Total Amount": 60694.40,
-                    "Lookup Name": request_name,
-                    "Multiplier": 1.0,
-                    "Pricing Mode": "Optional AC",
-                })
-                package_items.append({
-                    "No.": len(package_items) + 1,
+                    "Pricing Key": "AC-RECEPTION-3HP",
+                },
+                {
+                    "Add": False,
+                    "Optional Item": "BEDROOM AC 1.5 HP",
+                    "QTY": float(num_beds),
+                    "Rate (EGP)": 38772.20,
                     "Description": (
                         "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, "
                         "including freon piping required."
                     ),
                     "Unit": "NO.",
-                    "QTY": float(num_beds),
-                    "Rate": 38772.20,
-                    "Total Amount": float(num_beds) * 38772.20,
-                    "Lookup Name": request_name,
-                    "Multiplier": 1.0,
-                    "Pricing Mode": "Optional AC",
-                })
-            return package_items
-
-        st.markdown("##### Complete Furniture Package")
-        package_col, typology_col = st.columns(2)
-        with package_col:
-            fur_package = st.selectbox(
-                "Select Furniture Package",
-                ["Luxury [L]", "Deluxe [D]", "Rent [R]"],
-            )
-        with typology_col:
-            fur_unit_type = st.selectbox(
-                "Select Unit Typology",
-                [
-                    "1 Bedroom",
-                    "2 Bedrooms",
-                    "3 Bedrooms",
-                    "3 Bedrooms+N",
-                    "3 Bedrooms+N+F",
-                    "4 Bedrooms+N",
+                    "Pricing Key": "AC-BEDROOM-1.5HP",
+                },
+            ])
+            selected_addons = st.data_editor(
+                pd.DataFrame(addon_catalog),
+                use_container_width=True,
+                hide_index=True,
+                num_rows="fixed",
+                key=(
+                    f"furniture_addon_selector_{fur_unit_type}_{addon_code}_"
+                    f"{selection_revision}"
+                ),
+                column_config={
+                    "Add": st.column_config.CheckboxColumn(
+                        "Add",
+                        default=False,
+                    ),
+                    "Optional Item": st.column_config.TextColumn(
+                        "Optional Item",
+                        disabled=True,
+                    ),
+                    "QTY": st.column_config.NumberColumn(
+                        "QTY",
+                        min_value=1.0,
+                        step=1.0,
+                    ),
+                    "Rate (EGP)": st.column_config.NumberColumn(
+                        "Rate (EGP)",
+                        format="%.2f",
+                        disabled=True,
+                    ),
+                    "Description": None,
+                    "Unit": None,
+                    "Pricing Key": None,
+                },
+                disabled=[
+                    "Optional Item",
+                    "Rate (EGP)",
+                    "Description",
+                    "Unit",
+                    "Pricing Key",
                 ],
             )
-        if st.button("➕ Populate Package", use_container_width=True):
-            st.session_state.staged_items = build_furniture_package(
-                fur_unit_type, fur_package
-            )
-            st.toast("Furniture package loaded successfully!")
-            st.rerun()
+
+        if st.button(
+            "➕ Add Selected Items to Quotation",
+            type="primary",
+            use_container_width=True,
+        ):
+            selected_items = []
+            for _, row in selected_room_options.iterrows():
+                if not bool(row["Add"]):
+                    continue
+                rate_key = str(row["Rate Key"])
+                option_label = str(row["Furniture Option"])
+                quantity = float(row["QTY"])
+                rate = float(FURNITURE_RATES[rate_key])
+                selected_items.append({
+                    "Option": option_label,
+                    "Description": (
+                        f"Supply and install Furniture for {option_label}, including "
+                        "Curtains, rugs, cushions, bed linens, table lamps, pendant "
+                        "lights, and mattresses."
+                    ),
+                    "Unit": "LS",
+                    "QTY": quantity,
+                    "Rate": rate,
+                    "Lookup Name": request_name,
+                    "Pricing Key": f"ROOM-{rate_key}",
+                    "Pricing Mode": "Room Selection",
+                })
+
+            for _, row in selected_addons.iterrows():
+                if not bool(row["Add"]):
+                    continue
+                selected_items.append({
+                    "Option": str(row["Optional Item"]),
+                    "Description": str(row["Description"]),
+                    "Unit": str(row["Unit"]),
+                    "QTY": float(row["QTY"]),
+                    "Rate": float(row["Rate (EGP)"]),
+                    "Lookup Name": request_name,
+                    "Pricing Key": str(row["Pricing Key"]),
+                    "Pricing Mode": "Optional Add-on",
+                })
+
+            if not selected_items:
+                st.warning("Check at least one item before adding.")
+            else:
+                existing_keys = {
+                    item.get("Pricing Key")
+                    for item in st.session_state.staged_items
+                }
+                added_count = 0
+                skipped_count = 0
+                for item in selected_items:
+                    if item["Pricing Key"] in existing_keys:
+                        skipped_count += 1
+                        continue
+                    item["No."] = len(st.session_state.staged_items) + 1
+                    item["Total Amount"] = item["QTY"] * item["Rate"]
+                    st.session_state.staged_items.append(item)
+                    existing_keys.add(item["Pricing Key"])
+                    added_count += 1
+
+                if added_count:
+                    st.session_state.furniture_selection_revision += 1
+                    st.toast(f"{added_count} item(s) added to the quotation.")
+                    st.rerun()
+                elif skipped_count:
+                    st.warning(
+                        "The checked items are already in the quotation. "
+                        "Edit their quantities in the table below."
+                    )
 
         if st.session_state.staged_items:
             st.markdown("### 📊 Active Furniture Quotation")
             st.info(
-                "Edit quantities or delete unwanted rows. Rates are locked."
+                "Quantities can be edited and unwanted rows can be deleted. "
+                "Options and rates are locked."
             )
             df_staged = pd.DataFrame(st.session_state.staged_items)
             edited_df = st.data_editor(
@@ -679,24 +772,54 @@ if df_fact is not None and not df_fact.empty:
                 use_container_width=True,
                 hide_index=True,
                 num_rows="dynamic",
-                key="furniture_editor",
+                key="furniture_editor_room_selection_v1",
                 column_config={
                     "Lookup Name": None,
-                    "Multiplier": None,
+                    "Pricing Key": None,
                     "Pricing Mode": None,
-                    "No.": st.column_config.NumberColumn("No.", disabled=True),
-                    "Description": st.column_config.TextColumn(
-                        "Description", disabled=True
+                    "No.": st.column_config.NumberColumn(
+                        "No.",
+                        disabled=True,
                     ),
-                    "Unit": st.column_config.TextColumn("Unit", disabled=True),
-                    "QTY": st.column_config.NumberColumn("QTY", min_value=0.0),
+                    "Option": st.column_config.TextColumn(
+                        "Option",
+                        disabled=True,
+                    ),
+                    "Description": st.column_config.TextColumn(
+                        "Description",
+                        disabled=True,
+                    ),
+                    "Unit": st.column_config.TextColumn(
+                        "Unit",
+                        disabled=True,
+                    ),
+                    "QTY": st.column_config.NumberColumn(
+                        "QTY",
+                        min_value=1.0,
+                        step=1.0,
+                    ),
                     "Rate": st.column_config.NumberColumn(
-                        "Rate", format="%.2f", disabled=True
+                        "Rate",
+                        format="%.2f",
+                        disabled=True,
                     ),
                     "Total Amount": st.column_config.NumberColumn(
-                        "Total", format="%.2f", disabled=True
+                        "Total",
+                        format="%.2f",
+                        disabled=True,
                     ),
                 },
+                disabled=[
+                    "No.",
+                    "Option",
+                    "Description",
+                    "Unit",
+                    "Rate",
+                    "Total Amount",
+                    "Lookup Name",
+                    "Pricing Key",
+                    "Pricing Mode",
+                ],
             )
 
             updated_items = []
@@ -717,121 +840,21 @@ if df_fact is not None and not df_fact.empty:
             )
             vat = subtotal * 0.14
             total_with_vat = subtotal + vat
-            col_t1, col_t2 = st.columns(2)
-            col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-            col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+            total_col1, total_col2 = st.columns(2)
+            total_col1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+            total_col2.metric(
+                "Total with 14% VAT (EGP)",
+                f"{total_with_vat:,.2f} EGP",
+            )
 
             if st.button(
-                "❌ Clear Furniture Configuration",
+                "❌ Clear Furniture Quotation",
                 type="secondary",
                 use_container_width=True,
             ):
                 st.session_state.staged_items = []
+                st.session_state.furniture_selection_revision += 1
                 st.rerun()
-
-            with st.expander("Bulk Export: Generate All 18 Package Options"):
-                st.warning(
-                    "This creates six typologies × three package tiers. The optional "
-                    "Kitchen, Closets and AC selections above apply to every option."
-                )
-                if st.button(
-                    "Generate & Export All 18 Options",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    typologies = [
-                        "1 Bedroom",
-                        "2 Bedrooms",
-                        "3 Bedrooms",
-                        "3 Bedrooms+N",
-                        "3 Bedrooms+N+F",
-                        "4 Bedrooms+N",
-                    ]
-                    packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
-                    total_iterations = len(typologies) * len(packages)
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    final_client_name = (
-                        client_name.strip() if client_name.strip() else "Unassigned"
-                    )
-                    headers = {"Content-Type": "application/json"}
-                    success_count = 0
-                    current_iteration = 0
-
-                    terms_request_col = df_terms.columns[0]
-                    terms_text_col = (
-                        df_terms.columns[1]
-                        if len(df_terms.columns) > 1
-                        else df_terms.columns[0]
-                    )
-                    furniture_terms_rows = df_terms[
-                        df_terms[terms_request_col]
-                        .astype(str)
-                        .str.strip()
-                        .str.upper()
-                        == "FURNITURE"
-                    ]
-                    furniture_master_terms = (
-                        str(furniture_terms_rows.iloc[0][terms_text_col])
-                        if not furniture_terms_rows.empty
-                        else ""
-                    )
-
-                    for typology in typologies:
-                        for package in packages:
-                            current_iteration += 1
-                            request_name = f"{typology}, {package}"
-                            status_text.text(
-                                f"Compiling {current_iteration}/{total_iterations}: "
-                                f"{request_name}..."
-                            )
-                            items = build_furniture_package(typology, package)
-                            payload = {
-                                "action": "standard",
-                                "requestCategory": "Furniture",
-                                "unitId": selected_unit,
-                                "clientName": final_client_name,
-                                "zone": str(zone_name),
-                                "requestType": request_name,
-                                "generatedTermsAndConditions": furniture_master_terms,
-                                "items": [
-                                    {
-                                        "description": item["Description"],
-                                        "unit": item["Unit"],
-                                        "qty": item["QTY"],
-                                        "rate": item["Rate"],
-                                    }
-                                    for item in items
-                                ],
-                            }
-
-                            try:
-                                response = requests.post(
-                                    WEBHOOK_URL,
-                                    data=json.dumps(payload),
-                                    headers=headers,
-                                )
-                                response_data = response.json()
-                                if response_data.get("status") == "success":
-                                    success_count += 1
-                            except Exception as error:
-                                st.toast(
-                                    f"Error on {request_name}: {error}",
-                                    icon="🚨",
-                                )
-                            progress_bar.progress(
-                                current_iteration / total_iterations
-                            )
-                            time.sleep(1)
-
-                    if success_count == total_iterations:
-                        status_text.success(
-                            f"All {success_count} packages were generated successfully."
-                        )
-                    else:
-                        status_text.warning(
-                            f"{success_count} of {total_iterations} packages succeeded."
-                        )
 
     elif selected_request_type == "Closing Double Height":
         st.markdown("### 🏗️ Closing Double Height Configuration")

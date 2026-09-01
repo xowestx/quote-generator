@@ -23,8 +23,15 @@ class FurnitureConfigurationTests(unittest.TestCase):
         cls.app_source = APP_PATH.read_text(encoding="utf-8")
         cls.app_tree = ast.parse(cls.app_source)
         cls.script_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.furniture_section = cls.app_source.split(
+            'elif selected_request_type == "Furniture":',
+            1,
+        )[1].split(
+            'elif selected_request_type == "Closing Double Height":',
+            1,
+        )[0]
 
-    def test_existing_furniture_base_rates_are_unchanged(self):
+    def test_existing_furniture_rates_are_unchanged(self):
         self.assertEqual(
             assigned_literal(self.app_tree, "FURNITURE_RATES"),
             {
@@ -61,33 +68,75 @@ class FurnitureConfigurationTests(unittest.TestCase):
             "60694.40",
             "38772.20",
         ):
-            self.assertIn(exact_price, self.app_source)
+            self.assertIn(exact_price, self.furniture_section)
 
-    def test_only_l_d_r_package_ui_is_available(self):
-        self.assertIn(
-            '["Luxury [L]", "Deluxe [D]", "Rent [R]"]',
-            self.app_source,
-        )
-        self.assertNotIn("Option B: Custom Room / Design", self.app_source)
-        self.assertNotIn("Append Custom Room", self.app_source)
-        self.assertNotIn("Select Room Design Option", self.app_source)
-        self.assertNotIn("FURNITURE_PACKAGE_DESIGNS", self.app_source)
-
-    def test_kitchen_closets_and_ac_are_optional(self):
-        for label in (
-            "Include Kitchen",
-            "Include Closets",
-            "Include Air Conditioning",
+    def test_room_options_use_checkbox_quantity_table(self):
+        for required_text in (
+            '"Add": False',
+            '"Furniture Option"',
+            '"QTY"',
+            '"Rate (EGP)"',
+            "CheckboxColumn",
+            "Add Selected Items to Quotation",
         ):
-            self.assertIn(label, self.app_source)
+            self.assertIn(required_text, self.furniture_section)
+        self.assertNotIn("Select Furniture Package", self.furniture_section)
+        self.assertNotIn("Populate Package", self.furniture_section)
+
+    def test_typology_filters_applicable_rooms(self):
+        for required_room in (
+            '"RECEPTION"',
+            '"DINING ROOM"',
+            '"MASTER BEDROOM"',
+            '"KIDS BEDROOM"',
+            '"NANNY\'S ROOM"',
+            '"LIVING ROOM"',
+            '"TERRACE"',
+            '"OUTDOORS"',
+        ):
+            self.assertIn(required_room, self.furniture_section)
+        self.assertIn('if num_beds > 1:', self.furniture_section)
+        self.assertIn('if "+N" in fur_unit_type:', self.furniture_section)
+        self.assertIn('if "+F" in fur_unit_type:', self.furniture_section)
+
+    def test_room_prices_are_direct_and_not_package_scaled(self):
+        self.assertIn(
+            'float(FURNITURE_RATES[rate_key])',
+            self.furniture_section,
+        )
+        self.assertNotIn("* multiplier", self.furniture_section)
+        self.assertNotIn("build_furniture_package", self.furniture_section)
+
+    def test_optional_items_use_same_check_and_quantity_pattern(self):
+        self.assertIn(
+            "Optional Kitchen, Closets & Air Conditioning",
+            self.furniture_section,
+        )
+        for label in (
+            "KITCHEN",
+            "MASTER BEDROOM CLOSETS",
+            "RECEPTION AC 3 HP",
+            "BEDROOM AC 1.5 HP",
+        ):
+            self.assertIn(label, self.furniture_section)
+
+    def test_duplicate_pricing_keys_are_not_added_twice(self):
+        self.assertIn("existing_keys", self.furniture_section)
+        self.assertIn(
+            'if item["Pricing Key"] in existing_keys:',
+            self.furniture_section,
+        )
 
     def test_streamlit_ignores_design_pdf_workflow(self):
-        self.assertNotIn('"baseKey":', self.app_source)
-        self.assertNotIn('"Base Key":', self.app_source)
-        self.assertNotIn("generateDocOnly", self.app_source)
-        self.assertNotIn("roomBase64s", self.app_source)
-        self.assertNotIn("missingRoomPdfs", self.app_source)
-        self.assertNotIn("merge_pdf_base64", self.app_source)
+        for forbidden_text in (
+            '"baseKey":',
+            '"Base Key":',
+            "generateDocOnly",
+            "roomBase64s",
+            "missingRoomPdfs",
+            "merge_pdf_base64",
+        ):
+            self.assertNotIn(forbidden_text, self.app_source)
 
     def test_furniture_uses_standard_deployed_apps_script_route(self):
         furniture_export = self.app_source.split(
