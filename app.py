@@ -5,8 +5,6 @@ from fpdf import FPDF
 import re
 import requests
 import json
-import base64
-import io
 import time
 
 from terms_engine import (
@@ -14,13 +12,6 @@ from terms_engine import (
     parse_terms_defaults,
     validate_terms_values,
 )
-
-# Import PDF Merger
-try:
-    from pypdf import PdfWriter
-    has_pypdf = True
-except ImportError:
-    has_pypdf = False
 
 # Verified Room-by-Room Furniture Rate Mapping (As per Rates Tab Option "O")
 FURNITURE_RATES = {
@@ -412,162 +403,277 @@ if df_fact is not None and not df_fact.empty:
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
 
     elif selected_request_type == "Furniture":
-        st.markdown("### 🛋️ Room-by-Room Furniture Builder")
-        st.info("💡 **Unified System Workspace:** Select your Package Level (rates scale dynamically: Luxury = 100%, Deluxe = 70%, Rent = 35%). Load clean typology presets or append specific rooms exactly as they appear in your Rates Database.")
-        
-        # Ensure st.session_state.staged_items is formatted correctly as a list
-        if 'staged_items' not in st.session_state or not isinstance(st.session_state.staged_items, list):
-            st.session_state.staged_items = []
-            
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            st.markdown("##### Option A: Quick Populate Typology Preset")
-            fur_package = st.selectbox("Select Furniture Package Tier", ["Luxury [L]", "Deluxe [D]", "Rent [R]"])
-            fur_unit_type = st.selectbox("Select Unit Typology Preset", ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"])
-            
-            # Map selected package tier to multiplier factor
-            pkg_code_letter = "L" if "Luxury" in fur_package else "D" if "Deluxe" in fur_package else "R"
-            multiplier = 1.0 if pkg_code_letter == "L" else 0.7 if pkg_code_letter == "D" else 0.35
-            
-            if st.button("➕ Populate Preset Rooms", use_container_width=True):
-                rooms_to_add = []
-                
-                # Setup specific room names directly matching structural rate mapping definitions
-                rooms_to_add.append({"desc": "Reception Room", "qty": 1.0, "key": "RECEPTION - P1"})
-                rooms_to_add.append({"desc": "Dining Room", "qty": 1.0, "key": "DINING ROOM - P2"})
-                rooms_to_add.append({"desc": "Terrace Area", "qty": 1.0, "key": "TERRACE - P1"})
-                
-                if "+N" in fur_unit_type: 
-                    rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "key": "NANNY'S ROOM"})
-                if "+F" in fur_unit_type: 
-                    rooms_to_add.append({"desc": "Living Room Area", "qty": 1.0, "key": "LIVING ROOM - P1"})
-                    
-                num_beds = int(fur_unit_type[0])
-                rooms_to_add.append({"desc": "Master Bedroom Area", "qty": 1.0, "key": "MASTER BEDROOM - P1"})
-                if num_beds > 1: 
-                    rooms_to_add.append({"desc": "Kids Bedroom Area", "qty": float(num_beds - 1), "key": "KIDS BEDROOM - P1"})
-                    
-                fur_request_name = f"{fur_unit_type}, {fur_package}"
+        st.markdown("### 🛋️ Furniture Quotation Builder")
+        st.info(
+            "Select the L/D/R package and unit typology. Kitchen, Closets and Air "
+            "Conditioning can be included or excluded independently. Existing prices "
+            "and package calculations remain unchanged."
+        )
 
-                new_staged = []
-                for idx, r in enumerate(rooms_to_add):
-                    base_rate = FURNITURE_RATES[r["key"]]
-                    scaled_rate = base_rate * multiplier
-                    total = r["qty"] * scaled_rate
-                    # ADDED NEW FURNITURE INCLUSIONS HERE
-                    full_desc = f"Supply and install Furniture for {r['desc']} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses."
-                    new_staged.append({
-                        'No.': idx + 1, 
-                        'Description': full_desc, 
-                        'Unit': 'LS', 
-                        'QTY': r["qty"], 
-                        'Rate': scaled_rate,
-                        'Total Amount': total, 
-                        'Lookup Name': fur_request_name,
-                        'Base Key': r["key"],
-                        'Multiplier': multiplier
-                    })
-                    
-                # ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
-                # Kitchen
-                kitchen_desc = f"Supply and install kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
-                kitchen_rate = 354350.00 if pkg_code_letter == 'L' else 270050.00 if pkg_code_letter == 'D' else 185750.00
-                new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': kitchen_desc, 'Unit': 'LS', 'QTY': 1.0,
-                    'Rate': kitchen_rate, 'Total Amount': kitchen_rate, 'Lookup Name': fur_request_name, 'Base Key': f"KITCHEN - {pkg_code_letter}", 'Multiplier': 1.0
+        if 'staged_items' not in st.session_state or not isinstance(
+            st.session_state.staged_items, list
+        ):
+            st.session_state.staged_items = []
+
+        st.markdown("##### Optional Add-ons")
+        optional_col1, optional_col2, optional_col3 = st.columns(3)
+        with optional_col1:
+            include_furniture_kitchen = st.checkbox(
+                "Include Kitchen",
+                value=True,
+                key="include_furniture_kitchen",
+            )
+        with optional_col2:
+            include_furniture_closets = st.checkbox(
+                "Include Closets",
+                value=True,
+                key="include_furniture_closets",
+            )
+        with optional_col3:
+            include_furniture_ac = st.checkbox(
+                "Include Air Conditioning",
+                value=True,
+                key="include_furniture_ac",
+            )
+        st.caption(
+            "Optional selections are applied when you populate a preset or run bulk export."
+        )
+
+        def build_furniture_package(unit_type, package_label):
+            """Build one package while preserving every existing numeric price."""
+            package_code = (
+                "L" if "Luxury" in package_label
+                else "D" if "Deluxe" in package_label
+                else "R"
+            )
+            multiplier = (
+                1.0 if package_code == "L"
+                else 0.7 if package_code == "D"
+                else 0.35
+            )
+            num_beds = int(unit_type[0])
+            request_name = f"{unit_type}, {package_label}"
+            room_specs = [
+                {
+                    "desc": "Reception Room",
+                    "qty": 1.0,
+                    "rate_key": "RECEPTION - P1",
+                },
+                {
+                    "desc": "Dining Room",
+                    "qty": 1.0,
+                    "rate_key": "DINING ROOM - P2",
+                },
+                {
+                    "desc": "Terrace Area",
+                    "qty": 1.0,
+                    "rate_key": "TERRACE - P1",
+                },
+            ]
+            if "+N" in unit_type:
+                room_specs.append({
+                    "desc": "Nanny's Room",
+                    "qty": 1.0,
+                    "rate_key": "NANNY'S ROOM",
                 })
-                
-                # Closets (Master vs Kids)
-                if pkg_code_letter == 'L':
-                    closet_desc_base = "Supply and install a wardrobe constructed from 'Good Wood' blockboard with an HPL finish and pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+            if "+F" in unit_type:
+                room_specs.append({
+                    "desc": "Living Room Area",
+                    "qty": 1.0,
+                    "rate_key": "LIVING ROOM - P1",
+                })
+            room_specs.append({
+                "desc": "Master Bedroom Area",
+                "qty": 1.0,
+                "rate_key": "MASTER BEDROOM - P1",
+                "design_group": "MASTER BEDROOM",
+            })
+            if num_beds > 1:
+                room_specs.append({
+                    "desc": "Kids Bedroom Area",
+                    "qty": float(num_beds - 1),
+                    "rate_key": "KIDS BEDROOM - P1",
+                })
+
+            package_items = []
+            for room in room_specs:
+                rate = FURNITURE_RATES[room["rate_key"]] * multiplier
+                description = (
+                    f"Supply and install Furniture for {room['desc']} as per attached "
+                    "design, including Curtains, rugs, cushions, bed linens, table "
+                    "lamps, pendant lights, and mattresses."
+                )
+                package_items.append({
+                    "No.": len(package_items) + 1,
+                    "Description": description,
+                    "Unit": "LS",
+                    "QTY": room["qty"],
+                    "Rate": rate,
+                    "Total Amount": room["qty"] * rate,
+                    "Lookup Name": request_name,
+                    "Multiplier": multiplier,
+                    "Pricing Mode": f"Package {package_code}",
+                })
+
+            if include_furniture_kitchen:
+                kitchen_finish = (
+                    "Luxury" if package_code == "L"
+                    else "Deluxe" if package_code == "D"
+                    else "Rent"
+                )
+                kitchen_rate = (
+                    354350.00 if package_code == "L"
+                    else 270050.00 if package_code == "D"
+                    else 185750.00
+                )
+                package_items.append({
+                    "No.": len(package_items) + 1,
+                    "Description": (
+                        f"Supply and install kitchen with {kitchen_finish} finish as "
+                        "per approved sample and attached design."
+                    ),
+                    "Unit": "LS",
+                    "QTY": 1.0,
+                    "Rate": kitchen_rate,
+                    "Total Amount": kitchen_rate,
+                    "Lookup Name": request_name,
+                    "Multiplier": 1.0,
+                    "Pricing Mode": "Optional Kitchen",
+                })
+
+            if include_furniture_closets:
+                if package_code == "L":
+                    closet_description = (
+                        "Supply and install a wardrobe constructed from 'Good Wood' "
+                        "blockboard with an HPL finish and pressed blockboard boxes, "
+                        "fully fitted with hinged wooden doors and all necessary "
+                        "installation hardware. SIZE: 2800 X 2200 MM H"
+                    )
                     closet_rate = 72800.00
-                elif pkg_code_letter == 'D':
-                    closet_desc_base = "Supply and install a wardrobe constructed from melamine-faced blockboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                elif package_code == "D":
+                    closet_description = (
+                        "Supply and install a wardrobe constructed from melamine-faced "
+                        "blockboard with pressed blockboard boxes, fully fitted with "
+                        "hinged wooden doors and all necessary installation hardware. "
+                        "SIZE: 2800 X 2200 MM H"
+                    )
                     closet_rate = 72800.00 * 0.7
                 else:
-                    closet_desc_base = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
+                    closet_description = (
+                        "Supply and install a wardrobe constructed from melamine-faced "
+                        "chipboard with pressed blockboard boxes, fully fitted with "
+                        "hinged wooden doors and all necessary installation hardware. "
+                        "SIZE: 2800 X 2200 MM H"
+                    )
                     closet_rate = 72800.00 * 0.5
-                
-                # Master Bedroom Wardrobe
-                new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': closet_desc_base + " for Master Bedroom", 'Unit': 'NO.', 'QTY': 2.0,
-                    'Rate': closet_rate, 'Total Amount': 2.0 * closet_rate, 'Lookup Name': fur_request_name, 'Base Key': f"CLOSETS - {pkg_code_letter}", 'Multiplier': 1.0
+
+                package_items.append({
+                    "No.": len(package_items) + 1,
+                    "Description": closet_description + " for Master Bedroom",
+                    "Unit": "NO.",
+                    "QTY": 2.0,
+                    "Rate": closet_rate,
+                    "Total Amount": 2.0 * closet_rate,
+                    "Lookup Name": request_name,
+                    "Multiplier": 1.0,
+                    "Pricing Mode": "Optional Closets",
                 })
-                
-                # Kids Bedroom Wardrobe
                 if num_beds > 1:
-                    kids_qty = float(num_beds - 1)
-                    new_staged.append({
-                        'No.': len(new_staged) + 1, 'Description': closet_desc_base + " for Kids Bedrooms", 'Unit': 'NO.', 'QTY': kids_qty,
-                        'Rate': closet_rate, 'Total Amount': kids_qty * closet_rate, 'Lookup Name': fur_request_name, 'Base Key': f"CLOSETS - {pkg_code_letter}", 'Multiplier': 1.0
+                    kids_quantity = float(num_beds - 1)
+                    package_items.append({
+                        "No.": len(package_items) + 1,
+                        "Description": closet_description + " for Kids Bedrooms",
+                        "Unit": "NO.",
+                        "QTY": kids_quantity,
+                        "Rate": closet_rate,
+                        "Total Amount": kids_quantity * closet_rate,
+                        "Lookup Name": request_name,
+                        "Multiplier": 1.0,
+                        "Pricing Mode": "Optional Closets",
                     })
-                
-                # Nanny's Wardrobe
-                if "+N" in fur_unit_type:
-                    nanny_closet_desc = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2000 X 2200 MM H for Nanny's Room"
+                if "+N" in unit_type:
                     nanny_closet_rate = 22500.00
-                    new_staged.append({
-                        'No.': len(new_staged) + 1, 'Description': nanny_closet_desc, 'Unit': 'NO.', 'QTY': 1.0,
-                        'Rate': nanny_closet_rate, 'Total Amount': nanny_closet_rate, 'Lookup Name': fur_request_name, 'Base Key': "CLOSETS - NANNY", 'Multiplier': 1.0
+                    package_items.append({
+                        "No.": len(package_items) + 1,
+                        "Description": (
+                            "Supply and install a wardrobe constructed from "
+                            "melamine-faced chipboard with pressed blockboard boxes, "
+                            "fully fitted with hinged wooden doors and all necessary "
+                            "installation hardware. SIZE: 2000 X 2200 MM H for "
+                            "Nanny's Room"
+                        ),
+                        "Unit": "NO.",
+                        "QTY": 1.0,
+                        "Rate": nanny_closet_rate,
+                        "Total Amount": nanny_closet_rate,
+                        "Lookup Name": request_name,
+                        "Multiplier": 1.0,
+                        "Pricing Mode": "Optional Closets",
                     })
-                
-                # ACs UPDATED
-                new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 3 hp Carrier AC split unit for Reception, including freon piping required.", 'Unit': 'NO.', 'QTY': 1.0,
-                    'Rate': 60694.40, 'Total Amount': 60694.40, 'Lookup Name': fur_request_name, 'Base Key': "AC - 3HP", 'Multiplier': 1.0
-                })
-                new_staged.append({
-                    'No.': len(new_staged) + 1, 'Description': "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, including freon piping required.", 'Unit': 'NO.', 'QTY': float(num_beds),
-                    'Rate': 38772.20, 'Total Amount': float(num_beds) * 38772.20, 'Lookup Name': fur_request_name, 'Base Key': "AC - 1.5HP", 'Multiplier': 1.0
-                })
 
-                st.session_state.staged_items = new_staged
-                st.toast("Typology preset rooms loaded successfully!")
-
-        with col_f2:
-            st.markdown("##### Option B: Append Specific Database Room (O Option)")
-            add_room_pkg = st.selectbox("Select Package Tier for this Room", ["Luxury [L]", "Deluxe [D]", "Rent [R]"], key="add_room_pkg")
-            add_room_key = st.selectbox("Select Database Room Option", list(FURNITURE_RATES.keys()))
-            add_room_qty = st.number_input("Enter Quantity", min_value=1.0, max_value=10.0, value=1.0, step=1.0)
-            
-            if st.button("➕ Append Room Option", use_container_width=True):
-                pkg_code_letter_b = "L" if "Luxury" in add_room_pkg else "D" if "Deluxe" in add_room_pkg else "R"
-                multiplier_b = 1.0 if pkg_code_letter_b == "L" else 0.7 if pkg_code_letter_b == "D" else 0.35
-                
-                base_rate = FURNITURE_RATES[add_room_key]
-                scaled_rate = base_rate * multiplier_b
-                total = add_room_qty * scaled_rate
-                
-                clean_room_name = add_room_key.split(" - ")[0].title()
-                if "Nanny" in clean_room_name:
-                    clean_room_name = "Nanny's Room"
-                
-                # ADDED NEW FURNITURE INCLUSIONS HERE
-                full_desc = f"Supply and install Furniture for {clean_room_name} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses."
-                default_lookup = f"Custom Suite, {add_room_pkg}"
-                if st.session_state.staged_items:
-                    default_lookup = st.session_state.staged_items[0].get('Lookup Name', default_lookup)
-                
-                next_no = len(st.session_state.staged_items) + 1
-                st.session_state.staged_items.append({
-                    'No.': next_no,
-                    'Description': full_desc,
-                    'Unit': 'LS',
-                    'QTY': float(add_room_qty),
-                    'Rate': scaled_rate,
-                    'Total Amount': total,
-                    'Lookup Name': default_lookup,
-                    'Base Key': add_room_key,
-                    'Multiplier': multiplier_b
+            if include_furniture_ac:
+                package_items.append({
+                    "No.": len(package_items) + 1,
+                    "Description": (
+                        "Supply and install 3 hp Carrier AC split unit for Reception, "
+                        "including freon piping required."
+                    ),
+                    "Unit": "NO.",
+                    "QTY": 1.0,
+                    "Rate": 60694.40,
+                    "Total Amount": 60694.40,
+                    "Lookup Name": request_name,
+                    "Multiplier": 1.0,
+                    "Pricing Mode": "Optional AC",
                 })
-                st.rerun()
+                package_items.append({
+                    "No.": len(package_items) + 1,
+                    "Description": (
+                        "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, "
+                        "including freon piping required."
+                    ),
+                    "Unit": "NO.",
+                    "QTY": float(num_beds),
+                    "Rate": 38772.20,
+                    "Total Amount": float(num_beds) * 38772.20,
+                    "Lookup Name": request_name,
+                    "Multiplier": 1.0,
+                    "Pricing Mode": "Optional AC",
+                })
+            return package_items
+
+        st.markdown("##### Complete Furniture Package")
+        package_col, typology_col = st.columns(2)
+        with package_col:
+            fur_package = st.selectbox(
+                "Select Furniture Package",
+                ["Luxury [L]", "Deluxe [D]", "Rent [R]"],
+            )
+        with typology_col:
+            fur_unit_type = st.selectbox(
+                "Select Unit Typology",
+                [
+                    "1 Bedroom",
+                    "2 Bedrooms",
+                    "3 Bedrooms",
+                    "3 Bedrooms+N",
+                    "3 Bedrooms+N+F",
+                    "4 Bedrooms+N",
+                ],
+            )
+        if st.button("➕ Populate Package", use_container_width=True):
+            st.session_state.staged_items = build_furniture_package(
+                fur_unit_type, fur_package
+            )
+            st.toast("Furniture package loaded successfully!")
+            st.rerun()
 
         if st.session_state.staged_items:
-            st.markdown("### 📊 Active Unified Furniture Quotation List")
-            st.info("💡 **Interactive Table:** Select any row and press **Delete** (or click the trash icon) to remove specific rooms. You can also edit the QTY directly!")
-            
+            st.markdown("### 📊 Active Furniture Quotation")
+            st.info(
+                "Edit quantities or delete unwanted rows. Rates are locked."
+            )
             df_staged = pd.DataFrame(st.session_state.staged_items)
-            
             edited_df = st.data_editor(
                 df_staged,
                 use_container_width=True,
@@ -576,203 +682,156 @@ if df_fact is not None and not df_fact.empty:
                 key="furniture_editor",
                 column_config={
                     "Lookup Name": None,
-                    "Base Key": None,
                     "Multiplier": None,
+                    "Pricing Mode": None,
                     "No.": st.column_config.NumberColumn("No.", disabled=True),
-                    "Description": st.column_config.TextColumn("Description", disabled=True),
+                    "Description": st.column_config.TextColumn(
+                        "Description", disabled=True
+                    ),
                     "Unit": st.column_config.TextColumn("Unit", disabled=True),
                     "QTY": st.column_config.NumberColumn("QTY", min_value=0.0),
-                    "Rate": st.column_config.NumberColumn("Rate", format="%.2f", disabled=True),
-                    "Total Amount": st.column_config.NumberColumn("Total", format="%.2f", disabled=True)
-                }
+                    "Rate": st.column_config.NumberColumn(
+                        "Rate", format="%.2f", disabled=True
+                    ),
+                    "Total Amount": st.column_config.NumberColumn(
+                        "Total", format="%.2f", disabled=True
+                    ),
+                },
             )
-            
-            # Sync edits and row deletions back to staged_items
+
             updated_items = []
-            edited_df = edited_df.reset_index(drop=True)
-            for idx, row in edited_df.iterrows():
+            for _, row in edited_df.reset_index(drop=True).iterrows():
                 item = row.to_dict()
-                item['No.'] = len(updated_items) + 1
-                
-                # Recalculate totals dynamically if user edits QTY inside the table
-                rate = float(item.get('Rate', 0.0))
-                qty = float(item.get('QTY', 1.0))
-                item['Total Amount'] = qty * rate
-                
+                item["No."] = len(updated_items) + 1
+                item["Total Amount"] = float(item.get("QTY", 1.0)) * float(
+                    item.get("Rate", 0.0)
+                )
                 updated_items.append(item)
-                
-            # Update session state if user changed QTY or deleted a row
             if updated_items != st.session_state.staged_items:
                 st.session_state.staged_items = updated_items
                 st.rerun()
-            
-            subtotal = sum(item['Total Amount'] for item in st.session_state.staged_items)
+
+            subtotal = sum(
+                float(item["Total Amount"])
+                for item in st.session_state.staged_items
+            )
             vat = subtotal * 0.14
             total_with_vat = subtotal + vat
-
             col_t1, col_t2 = st.columns(2)
             col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
             col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
-            
-            if st.button("❌ Clear Furniture Configuration", type="secondary", use_container_width=True):
+
+            if st.button(
+                "❌ Clear Furniture Configuration",
+                type="secondary",
+                use_container_width=True,
+            ):
                 st.session_state.staged_items = []
                 st.rerun()
 
-            # ==========================================
-            # 🚀 BULK EXPORT ENGINE (ALL 18 PACKAGES)
-            # ==========================================
-            st.markdown("---")
-            st.markdown("### 🚀 Bulk Export Engine")
-            st.warning("⚠️ **Warning:** Generating all 18 PDFs involves heavy processing and API calls. This process will take a few minutes. Please do not close the window while the progress bar is running.")
-            
-            if st.button("🔥 Generate & Export All 18 Options (One-Click)", type="primary", use_container_width=True):
-                
-                # Define iteration matrices
-                typologies = ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "3 Bedrooms+N", "3 Bedrooms+N+F", "4 Bedrooms+N"]
-                packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
-                outdoors = ["No"] # STRICTLY SET TO 'No' TO REDUCE TO 18 OPTIONS
-                total_iters = len(typologies) * len(packages) * len(outdoors)
-                
-                # UI Feedback setup
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                final_client_name = client_name.strip() if client_name.strip() else "Unassigned"
-                headers = {"Content-Type": "application/json"}
-                success_count = 0
-                current_iter = 0
-                
-                for t in typologies:
-                    for p in packages:
-                        for o in outdoors:
-                            current_iter += 1
-                            
-                            # 1. Resolve Package Codes, Multipliers & Variables
-                            pkg_code_letter = "L" if "Luxury" in p else "D" if "Deluxe" in p else "R"
-                            payload_pkg_code = "P1" if pkg_code_letter == "L" else "P2" if pkg_code_letter == "D" else "P3"
-                            bulk_multiplier = 1.0 if pkg_code_letter == "L" else 0.7 if pkg_code_letter == "D" else 0.35
-                            
-                            outdoor_text = ", + Outdoor" if o == "Yes" else ""
-                            fur_request_name = f"{t}, {p}{outdoor_text}"
-                            status_text.text(f"⚙️ Compiling {current_iter}/{total_iters}: {fur_request_name}...")
-                            
-                            # 2. Build Automated BOQ for this specific combination
-                            rooms_to_add = [
-                                {"desc": "Reception Room", "qty": 1.0, "key": "RECEPTION - P1"},
-                                {"desc": "Dining Room", "qty": 1.0, "key": "DINING ROOM - P2"},
-                                {"desc": "Terrace Area", "qty": 1.0, "key": "TERRACE - P1"}
-                            ]
-                            if "+N" in t: 
-                                rooms_to_add.append({"desc": "Nanny's Room", "qty": 1.0, "key": "NANNY'S ROOM"})
-                            if "+F" in t: 
-                                rooms_to_add.append({"desc": "Living Room Area", "qty": 1.0, "key": "LIVING ROOM - P1"})
-                            
-                            num_beds = int(t[0])
-                            rooms_to_add.append({"desc": "Master Bedroom Area", "qty": 1.0, "key": "MASTER BEDROOM - P1"})
-                            if num_beds > 1: 
-                                rooms_to_add.append({"desc": "Kids Bedroom Area", "qty": float(num_beds - 1), "key": "KIDS BEDROOM - P1"})
-                            
-                            staged_items_payload = []
-                            for r in rooms_to_add:
-                                base_rate = FURNITURE_RATES[r["key"]]
-                                scaled_rate = base_rate * bulk_multiplier
-                                # ADDED NEW FURNITURE INCLUSIONS HERE
-                                staged_items_payload.append({
-                                    "description": f"Supply and install Furniture for {r['desc']} as per attached design, including Curtains, rugs, cushions, bed linens, table lamps, pendant lights, and mattresses.",
-                                    "unit": "LS", 
-                                    "qty": r["qty"], 
-                                    "rate": scaled_rate
-                                })
-                                
-                            # BULK ADD EXTRA AMENITIES: Kitchen, Closets, and ACs
-                            kitchen_desc = f"Supply and install kitchen with {'Luxury' if pkg_code_letter == 'L' else 'Deluxe' if pkg_code_letter == 'D' else 'Rent'} finish as per approved sample and attached design."
-                            kitchen_rate = 354350.00 if pkg_code_letter == 'L' else 270050.00 if pkg_code_letter == 'D' else 185750.00
-                            staged_items_payload.append({
-                                "description": kitchen_desc, "unit": "LS", "qty": 1.0, "rate": kitchen_rate
-                            })
+            with st.expander("Bulk Export: Generate All 18 Package Options"):
+                st.warning(
+                    "This creates six typologies × three package tiers. The optional "
+                    "Kitchen, Closets and AC selections above apply to every option."
+                )
+                if st.button(
+                    "Generate & Export All 18 Options",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    typologies = [
+                        "1 Bedroom",
+                        "2 Bedrooms",
+                        "3 Bedrooms",
+                        "3 Bedrooms+N",
+                        "3 Bedrooms+N+F",
+                        "4 Bedrooms+N",
+                    ]
+                    packages = ["Luxury [L]", "Deluxe [D]", "Rent [R]"]
+                    total_iterations = len(typologies) * len(packages)
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    final_client_name = (
+                        client_name.strip() if client_name.strip() else "Unassigned"
+                    )
+                    headers = {"Content-Type": "application/json"}
+                    success_count = 0
+                    current_iteration = 0
 
-                            if pkg_code_letter == 'L':
-                                closet_desc_base = "Supply and install a wardrobe constructed from 'Good Wood' blockboard with an HPL finish and pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
-                                closet_rate = 72800.00
-                            elif pkg_code_letter == 'D':
-                                closet_desc_base = "Supply and install a wardrobe constructed from melamine-faced blockboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
-                                closet_rate = 72800.00 * 0.7
-                            else:
-                                closet_desc_base = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2800 X 2200 MM H"
-                                closet_rate = 72800.00 * 0.5
-                            
-                            # Master Bedroom Wardrobe
-                            staged_items_payload.append({
-                                "description": closet_desc_base + " for Master Bedroom", "unit": "NO.", "qty": 2.0, "rate": closet_rate
-                            })
-                            
-                            # Kids Bedroom Wardrobe
-                            if num_beds > 1:
-                                staged_items_payload.append({
-                                    "description": closet_desc_base + " for Kids Bedrooms", "unit": "NO.", "qty": float(num_beds - 1), "rate": closet_rate
-                                })
-                            
-                            # Nanny's Wardrobe
-                            if "+N" in t:
-                                nanny_closet_desc = "Supply and install a wardrobe constructed from melamine-faced chipboard with pressed blockboard boxes, fully fitted with hinged wooden doors and all necessary installation hardware. SIZE: 2000 X 2200 MM H for Nanny's Room"
-                                staged_items_payload.append({
-                                    "description": nanny_closet_desc, "unit": "NO.", "qty": 1.0, "rate": 22500.00
-                                })
+                    terms_request_col = df_terms.columns[0]
+                    terms_text_col = (
+                        df_terms.columns[1]
+                        if len(df_terms.columns) > 1
+                        else df_terms.columns[0]
+                    )
+                    furniture_terms_rows = df_terms[
+                        df_terms[terms_request_col]
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
+                        == "FURNITURE"
+                    ]
+                    furniture_master_terms = (
+                        str(furniture_terms_rows.iloc[0][terms_text_col])
+                        if not furniture_terms_rows.empty
+                        else ""
+                    )
 
-                            # ACs UPDATED
-                            staged_items_payload.append({
-                                "description": "Supply and install 3 hp Carrier AC split unit for Reception, including freon piping required.", "unit": "NO.", "qty": 1.0, "rate": 60694.40
-                            })
-                            staged_items_payload.append({
-                                "description": "Supply and install 1.5 hp Carrier AC split unit for Bedrooms, including freon piping required.", "unit": "NO.", "qty": float(num_beds), "rate": 38772.20
-                            })
-                                
-                            # 3. Trigger Webhook (Doc Generation) - Sending typology name as requestType to trigger Apps Script regex!
+                    for typology in typologies:
+                        for package in packages:
+                            current_iteration += 1
+                            request_name = f"{typology}, {package}"
+                            status_text.text(
+                                f"Compiling {current_iteration}/{total_iterations}: "
+                                f"{request_name}..."
+                            )
+                            items = build_furniture_package(typology, package)
                             payload = {
-                                "action": "generateDocOnly",
+                                "action": "standard",
+                                "requestCategory": "Furniture",
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
-                                "requestType": fur_request_name,  # THIS FIXES THE TEMPLATE ISSUE
-                                "packageCode": payload_pkg_code,
-                                "packageName": fur_request_name,
-                                "items": staged_items_payload
-                            }
-                            
-                            try:
-                                res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                                res_data = res.json()
-                                
-                                if res_data.get("status") == "success":
-                                    # Skip PDF Merging and upload directly back
-                                    up_payload = {
-                                        "action": "uploadPdf",
-                                        "docName": res_data["docName"],
-                                        "base64Pdf": res_data["docBase64"],
-                                        "serialNumber": res_data["serialNumber"],
-                                        "unitId": selected_unit,
-                                        "clientName": final_client_name,
-                                        "requestType": fur_request_name,  # Matches above
-                                        "grandTotal": res_data["grandTotal"],
-                                        "zone": str(zone_name)
+                                "requestType": request_name,
+                                "generatedTermsAndConditions": furniture_master_terms,
+                                "items": [
+                                    {
+                                        "description": item["Description"],
+                                        "unit": item["Unit"],
+                                        "qty": item["QTY"],
+                                        "rate": item["Rate"],
                                     }
-                                    
-                                    up_res = requests.post(WEBHOOK_URL, data=json.dumps(up_payload), headers=headers)
-                                    if up_res.json().get("status") == "success":
-                                        success_count += 1
-                                        
-                            except Exception as e:
-                                st.toast(f"Error on {fur_request_name}: {e}", icon="🚨")
-                                
-                            # Update Progress Bar and throttle to protect API limits
-                            progress_bar.progress(current_iter / total_iters)
-                            time.sleep(1) # Protects Google Workspace from Rate Limiting
-                            
-                # Final Completion Status
-                if success_count == total_iters:
-                    status_text.success(f"✅ SUCCESS! All {success_count} packages compiled and synced to Google Workspace.")
-                else:
-                    status_text.warning(f"⚠️ Process finished. {success_count} out of {total_iters} succeeded. Check your workspace.")
+                                    for item in items
+                                ],
+                            }
+
+                            try:
+                                response = requests.post(
+                                    WEBHOOK_URL,
+                                    data=json.dumps(payload),
+                                    headers=headers,
+                                )
+                                response_data = response.json()
+                                if response_data.get("status") == "success":
+                                    success_count += 1
+                            except Exception as error:
+                                st.toast(
+                                    f"Error on {request_name}: {error}",
+                                    icon="🚨",
+                                )
+                            progress_bar.progress(
+                                current_iteration / total_iterations
+                            )
+                            time.sleep(1)
+
+                    if success_count == total_iterations:
+                        status_text.success(
+                            f"All {success_count} packages were generated successfully."
+                        )
+                    else:
+                        status_text.warning(
+                            f"{success_count} of {total_iterations} packages succeeded."
+                        )
 
     elif selected_request_type == "Closing Double Height":
         st.markdown("### 🏗️ Closing Double Height Configuration")
@@ -1258,7 +1317,7 @@ if df_fact is not None and not df_fact.empty:
     if st.session_state.staged_items:
         terms_lookup_name = selected_request_type
         if (
-            selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"]
+            selected_request_type in ["Roof Room", "Closing Double Height"]
             and "Lookup Name" in st.session_state.staged_items[0]
         ):
             terms_lookup_name = st.session_state.staged_items[0]["Lookup Name"]
@@ -1474,19 +1533,11 @@ if df_fact is not None and not df_fact.empty:
                                 "description": item.get("Description", ""),
                                 "unit": item.get("Unit", "LS"),
                                 "qty": item.get("QTY", 1.0),
-                                "rate": item.get("Rate", 0.0)
+                                "rate": item.get("Rate", 0.0),
                             })
                             
-                        # Add packageCode and packageName to the payload for single Furniture exports so it triggers the Furniture template
                         if selected_request_type == "Furniture":
-                            fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
-                            if "[L]" in fur_package_name: pkg_code = "P1"
-                            elif "[D]" in fur_package_name: pkg_code = "P2"
-                            elif "[R]" in fur_package_name: pkg_code = "P3"
-                            else: pkg_code = "P1"
-                            payload["action"] = "generateDocOnly"
-                            payload["packageCode"] = pkg_code
-                            payload["packageName"] = fur_package_name
+                            payload["requestCategory"] = "Furniture"
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
@@ -1497,35 +1548,10 @@ if df_fact is not None and not df_fact.empty:
                                 
                                 # Process standard quote
                                 if response_data.get("status") == "success":
-                                    if selected_request_type != "Furniture":
-                                        st.success("✅ Quotation Generated Successfully!")
-                                        st.session_state.doc_url = response_data.get('docUrl')
-                                        st.session_state.pdf_url = response_data.get('pdfUrl')
-                                        st.rerun()
-                                    else:
-                                        # Furniture 2-step (No PDF merging)
-                                        upload_payload = {
-                                            "action": "uploadPdf",
-                                            "docName": response_data["docName"],
-                                            "base64Pdf": response_data["docBase64"],
-                                            "serialNumber": response_data["serialNumber"],
-                                            "unitId": selected_unit,
-                                            "clientName": final_client_name,
-                                            "requestType": resolved_req_name, # Updated to match Typology
-                                            "grandTotal": response_data["grandTotal"],
-                                            "zone": str(zone_name)
-                                        }
-                                        
-                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
-                                        up_data = up_res.json()
-                                        
-                                        if up_data.get("status") == "success":
-                                            st.success("✅ Furniture Quotation Compiled Successfully!")
-                                            st.session_state.doc_url = response_data['docUrl']
-                                            st.session_state.pdf_url = up_data['pdfUrl']
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Failed to save final PDF: {up_data.get('message')}")
+                                    st.success("✅ Quotation Generated Successfully!")
+                                    st.session_state.doc_url = response_data.get("docUrl")
+                                    st.session_state.pdf_url = response_data.get("pdfUrl")
+                                    st.rerun()
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
