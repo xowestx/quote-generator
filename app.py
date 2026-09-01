@@ -5,8 +5,6 @@ from fpdf import FPDF
 import re
 import requests
 import json
-import base64
-import io
 import time
 
 from terms_engine import (
@@ -14,32 +12,6 @@ from terms_engine import (
     parse_terms_defaults,
     validate_terms_values,
 )
-
-# Import PDF Merger
-try:
-    from pypdf import PdfReader, PdfWriter
-    has_pypdf = True
-except ImportError:
-    has_pypdf = False
-
-
-def merge_pdf_base64(primary_pdf_base64, supplemental_pdf_base64s):
-    """Append selected furniture design PDFs to the quotation PDF."""
-    supplemental_pdf_base64s = [
-        pdf_data for pdf_data in (supplemental_pdf_base64s or []) if pdf_data
-    ]
-    if not has_pypdf or not supplemental_pdf_base64s:
-        return primary_pdf_base64
-
-    writer = PdfWriter()
-    for encoded_pdf in [primary_pdf_base64] + supplemental_pdf_base64s:
-        reader = PdfReader(io.BytesIO(base64.b64decode(encoded_pdf)))
-        for page in reader.pages:
-            writer.add_page(page)
-
-    output = io.BytesIO()
-    writer.write(output)
-    return base64.b64encode(output.getvalue()).decode("ascii")
 
 # Verified Room-by-Room Furniture Rate Mapping (As per Rates Tab Option "O")
 FURNITURE_RATES = {
@@ -62,38 +34,6 @@ FURNITURE_RATES = {
     "TERRACE - P3": 9803.42,
     "OUTDOORS - P1": 49704.38,
     "OUTDOORS - P2": 64153.21
-}
-
-# P1/P2/P3 are design options. L/D/R are package tiers. The correct design
-# code differs by room, so it must travel with each quotation item.
-FURNITURE_PACKAGE_DESIGNS = {
-    "L": {
-        "RECEPTION": "RECEPTION - P1",
-        "LIVING ROOM": "LIVING ROOM - P1",
-        "DINING ROOM": "DINING ROOM - P2",
-        "MASTER BEDROOM": "MASTER BEDROOM - P1",
-        "KIDS BEDROOM": "KIDS BEDROOM - P1",
-        "TERRACE": "TERRACE - P1",
-        "OUTDOORS": "OUTDOORS - P2",
-    },
-    "D": {
-        "RECEPTION": "RECEPTION - P2",
-        "LIVING ROOM": "LIVING ROOM - P2",
-        "DINING ROOM": "DINING ROOM - P1",
-        "MASTER BEDROOM": "MASTER BEDROOM - P3",
-        "KIDS BEDROOM": "KIDS BEDROOM - P2",
-        "TERRACE": "TERRACE - P2",
-        "OUTDOORS": "OUTDOORS - P1",
-    },
-    "R": {
-        "RECEPTION": "RECEPTION - P3",
-        "LIVING ROOM": "LIVING ROOM - P3",
-        "DINING ROOM": "DINING ROOM - P3",
-        "MASTER BEDROOM": "MASTER BEDROOM - P2",
-        "KIDS BEDROOM": "KIDS BEDROOM - P3",
-        "TERRACE": "TERRACE - P3",
-        "OUTDOORS": "OUTDOORS - P3",
-    },
 }
 
 LAND_EXTENSION_RATES = (55000.0, 65000.0)
@@ -465,9 +405,9 @@ if df_fact is not None and not df_fact.empty:
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Furniture Quotation Builder")
         st.info(
-            "Package Tier and Design Option are separate: L/D/R controls the package "
-            "level, while each room keeps its exact P1/P2/P3 design code. Custom "
-            "Option O rooms use their listed rate directly with no multiplier."
+            "Select the L/D/R package and unit typology. Kitchen, Closets and Air "
+            "Conditioning can be included or excluded independently. Existing prices "
+            "and package calculations remain unchanged."
         )
 
         if 'staged_items' not in st.session_state or not isinstance(
@@ -518,19 +458,16 @@ if df_fact is not None and not df_fact.empty:
                     "desc": "Reception Room",
                     "qty": 1.0,
                     "rate_key": "RECEPTION - P1",
-                    "design_group": "RECEPTION",
                 },
                 {
                     "desc": "Dining Room",
                     "qty": 1.0,
                     "rate_key": "DINING ROOM - P2",
-                    "design_group": "DINING ROOM",
                 },
                 {
                     "desc": "Terrace Area",
                     "qty": 1.0,
                     "rate_key": "TERRACE - P1",
-                    "design_group": "TERRACE",
                 },
             ]
             if "+N" in unit_type:
@@ -538,14 +475,12 @@ if df_fact is not None and not df_fact.empty:
                     "desc": "Nanny's Room",
                     "qty": 1.0,
                     "rate_key": "NANNY'S ROOM",
-                    "design_group": "NANNY'S ROOM",
                 })
             if "+F" in unit_type:
                 room_specs.append({
                     "desc": "Living Room Area",
                     "qty": 1.0,
                     "rate_key": "LIVING ROOM - P1",
-                    "design_group": "LIVING ROOM",
                 })
             room_specs.append({
                 "desc": "Master Bedroom Area",
@@ -558,15 +493,11 @@ if df_fact is not None and not df_fact.empty:
                     "desc": "Kids Bedroom Area",
                     "qty": float(num_beds - 1),
                     "rate_key": "KIDS BEDROOM - P1",
-                    "design_group": "KIDS BEDROOM",
                 })
 
             package_items = []
             for room in room_specs:
                 rate = FURNITURE_RATES[room["rate_key"]] * multiplier
-                design_key = FURNITURE_PACKAGE_DESIGNS[package_code].get(
-                    room["design_group"], room["rate_key"]
-                )
                 description = (
                     f"Supply and install Furniture for {room['desc']} as per attached "
                     "design, including Curtains, rugs, cushions, bed linens, table "
@@ -580,7 +511,6 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": rate,
                     "Total Amount": room["qty"] * rate,
                     "Lookup Name": request_name,
-                    "Base Key": design_key,
                     "Multiplier": multiplier,
                     "Pricing Mode": f"Package {package_code}",
                 })
@@ -607,7 +537,6 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": kitchen_rate,
                     "Total Amount": kitchen_rate,
                     "Lookup Name": request_name,
-                    "Base Key": f"KITCHEN - {package_code}",
                     "Multiplier": 1.0,
                     "Pricing Mode": "Optional Kitchen",
                 })
@@ -646,7 +575,6 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": closet_rate,
                     "Total Amount": 2.0 * closet_rate,
                     "Lookup Name": request_name,
-                    "Base Key": f"CLOSETS - {package_code}",
                     "Multiplier": 1.0,
                     "Pricing Mode": "Optional Closets",
                 })
@@ -660,7 +588,6 @@ if df_fact is not None and not df_fact.empty:
                         "Rate": closet_rate,
                         "Total Amount": kids_quantity * closet_rate,
                         "Lookup Name": request_name,
-                        "Base Key": f"CLOSETS - {package_code}",
                         "Multiplier": 1.0,
                         "Pricing Mode": "Optional Closets",
                     })
@@ -680,7 +607,6 @@ if df_fact is not None and not df_fact.empty:
                         "Rate": nanny_closet_rate,
                         "Total Amount": nanny_closet_rate,
                         "Lookup Name": request_name,
-                        "Base Key": "CLOSETS - NANNY",
                         "Multiplier": 1.0,
                         "Pricing Mode": "Optional Closets",
                     })
@@ -697,7 +623,6 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": 60694.40,
                     "Total Amount": 60694.40,
                     "Lookup Name": request_name,
-                    "Base Key": "AC - 3HP",
                     "Multiplier": 1.0,
                     "Pricing Mode": "Optional AC",
                 })
@@ -712,21 +637,21 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": 38772.20,
                     "Total Amount": float(num_beds) * 38772.20,
                     "Lookup Name": request_name,
-                    "Base Key": "AC - 1.5HP",
                     "Multiplier": 1.0,
                     "Pricing Mode": "Optional AC",
                 })
             return package_items
 
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            st.markdown("##### Option A: Complete Package")
+        st.markdown("##### Complete Furniture Package")
+        package_col, typology_col = st.columns(2)
+        with package_col:
             fur_package = st.selectbox(
-                "Select Furniture Package Tier",
+                "Select Furniture Package",
                 ["Luxury [L]", "Deluxe [D]", "Rent [R]"],
             )
+        with typology_col:
             fur_unit_type = st.selectbox(
-                "Select Unit Typology Preset",
+                "Select Unit Typology",
                 [
                     "1 Bedroom",
                     "2 Bedrooms",
@@ -736,37 +661,14 @@ if df_fact is not None and not df_fact.empty:
                     "4 Bedrooms+N",
                 ],
             )
-            if st.button("➕ Populate Package", use_container_width=True):
-                st.session_state.staged_items = build_furniture_package(
-                    fur_unit_type, fur_package
-                )
-                st.toast("Furniture package loaded successfully!")
-                st.rerun()
+        if st.button("➕ Populate Package", use_container_width=True):
+            st.session_state.staged_items = build_furniture_package(
+                fur_unit_type, fur_package
+            )
+            st.toast("Furniture package loaded successfully!")
+            st.rerun()
 
-        with col_f2:
-            st.markdown("##### Option B: Custom Room / Design (Option O)")
-            st.caption(
-                "Choose the exact P1/P2/P3 room design. Its stored Option O rate is "
-                "used directly without an L/D/R multiplier."
-            )
-            add_room_key = st.selectbox(
-                "Select Room Design Option",
-                list(FURNITURE_RATES.keys()),
-            )
-            add_room_qty = st.number_input(
-                "Enter Quantity",
-                min_value=1.0,
-                max_value=10.0,
-                value=1.0,
-                step=1.0,
-            )
-            if st.button("➕ Append Custom Room", use_container_width=True):
-                exact_rate = FURNITURE_RATES[add_room_key]
-                clean_room_name = add_room_key.rsplit(" - P", 1)[0].title()
-                if "Nanny" in clean_room_name:
-                    clean_room_name = "Nanny's Room"
-                lookup_name = "Furniture - Custom [O]"
-                if st.session_state.staged_items:
+        if st.session_state.staged_items:
                     lookup_name = st.session_state.staged_items[0].get(
                         "Lookup Name", lookup_name
                     )
@@ -783,7 +685,6 @@ if df_fact is not None and not df_fact.empty:
                     "Rate": exact_rate,
                     "Total Amount": float(add_room_qty) * exact_rate,
                     "Lookup Name": lookup_name,
-                    "Base Key": add_room_key,
                     "Multiplier": 1.0,
                     "Pricing Mode": "Custom Option O",
                 })
@@ -792,8 +693,7 @@ if df_fact is not None and not df_fact.empty:
         if st.session_state.staged_items:
             st.markdown("### 📊 Active Furniture Quotation")
             st.info(
-                "Edit quantities or delete unwanted rows. Rates and exact design "
-                "codes are locked."
+                "Edit quantities or delete unwanted rows. Rates are locked."
             )
             df_staged = pd.DataFrame(st.session_state.staged_items)
             edited_df = st.data_editor(
@@ -804,7 +704,6 @@ if df_fact is not None and not df_fact.empty:
                 key="furniture_editor",
                 column_config={
                     "Lookup Name": None,
-                    "Base Key": None,
                     "Multiplier": None,
                     "Pricing Mode": None,
                     "No.": st.column_config.NumberColumn("No.", disabled=True),
@@ -909,20 +808,13 @@ if df_fact is not None and not df_fact.empty:
                                 f"{request_name}..."
                             )
                             items = build_furniture_package(typology, package)
-                            package_code = (
-                                "P1" if "[L]" in package
-                                else "P2" if "[D]" in package
-                                else "P3"
-                            )
                             payload = {
-                                "action": "generateDocOnly",
+                                "action": "standard",
                                 "requestCategory": "Furniture",
                                 "unitId": selected_unit,
                                 "clientName": final_client_name,
                                 "zone": str(zone_name),
                                 "requestType": request_name,
-                                "packageCode": package_code,
-                                "packageName": request_name,
                                 "generatedTermsAndConditions": furniture_master_terms,
                                 "items": [
                                     {
@@ -930,7 +822,6 @@ if df_fact is not None and not df_fact.empty:
                                         "unit": item["Unit"],
                                         "qty": item["QTY"],
                                         "rate": item["Rate"],
-                                        "baseKey": item["Base Key"],
                                     }
                                     for item in items
                                 ],
@@ -944,29 +835,7 @@ if df_fact is not None and not df_fact.empty:
                                 )
                                 response_data = response.json()
                                 if response_data.get("status") == "success":
-                                    merged_pdf = merge_pdf_base64(
-                                        response_data["docBase64"],
-                                        response_data.get("roomBase64s", []),
-                                    )
-                                    upload_payload = {
-                                        "action": "uploadPdf",
-                                        "requestCategory": "Furniture",
-                                        "docName": response_data["docName"],
-                                        "base64Pdf": merged_pdf,
-                                        "serialNumber": response_data["serialNumber"],
-                                        "unitId": selected_unit,
-                                        "clientName": final_client_name,
-                                        "requestType": request_name,
-                                        "grandTotal": response_data["grandTotal"],
-                                        "zone": str(zone_name),
-                                    }
-                                    upload_response = requests.post(
-                                        WEBHOOK_URL,
-                                        data=json.dumps(upload_payload),
-                                        headers=headers,
-                                    )
-                                    if upload_response.json().get("status") == "success":
-                                        success_count += 1
+                                    success_count += 1
                             except Exception as error:
                                 st.toast(
                                     f"Error on {request_name}: {error}",
@@ -1687,20 +1556,10 @@ if df_fact is not None and not df_fact.empty:
                                 "unit": item.get("Unit", "LS"),
                                 "qty": item.get("QTY", 1.0),
                                 "rate": item.get("Rate", 0.0),
-                                "baseKey": item.get("Base Key", ""),
                             })
                             
-                        # Add packageCode and packageName to the payload for single Furniture exports so it triggers the Furniture template
                         if selected_request_type == "Furniture":
-                            fur_package_name = st.session_state.staged_items[0].get('Lookup Name', '')
-                            if "[L]" in fur_package_name: pkg_code = "P1"
-                            elif "[D]" in fur_package_name: pkg_code = "P2"
-                            elif "[R]" in fur_package_name: pkg_code = "P3"
-                            else: pkg_code = "P1"
-                            payload["action"] = "generateDocOnly"
                             payload["requestCategory"] = "Furniture"
-                            payload["packageCode"] = pkg_code
-                            payload["packageName"] = fur_package_name
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
@@ -1711,51 +1570,10 @@ if df_fact is not None and not df_fact.empty:
                                 
                                 # Process standard quote
                                 if response_data.get("status") == "success":
-                                    if selected_request_type != "Furniture":
-                                        st.success("✅ Quotation Generated Successfully!")
-                                        st.session_state.doc_url = response_data.get('docUrl')
-                                        st.session_state.pdf_url = response_data.get('pdfUrl')
-                                        st.rerun()
-                                    else:
-                                        # Furniture 2-step: merge the quotation with
-                                        # the exact selected room-design PDFs.
-                                        missing_room_pdfs = response_data.get(
-                                            "missingRoomPdfs", []
-                                        )
-                                        if missing_room_pdfs:
-                                            st.warning(
-                                                "Quotation created, but these furniture "
-                                                "design PDFs are missing from the Drive "
-                                                "folder: "
-                                                + ", ".join(missing_room_pdfs)
-                                            )
-                                        merged_pdf = merge_pdf_base64(
-                                            response_data["docBase64"],
-                                            response_data.get("roomBase64s", []),
-                                        )
-                                        upload_payload = {
-                                            "action": "uploadPdf",
-                                            "requestCategory": "Furniture",
-                                            "docName": response_data["docName"],
-                                            "base64Pdf": merged_pdf,
-                                            "serialNumber": response_data["serialNumber"],
-                                            "unitId": selected_unit,
-                                            "clientName": final_client_name,
-                                            "requestType": resolved_req_name,
-                                            "grandTotal": response_data["grandTotal"],
-                                            "zone": str(zone_name)
-                                        }
-                                        
-                                        up_res = requests.post(WEBHOOK_URL, data=json.dumps(upload_payload), headers=headers)
-                                        up_data = up_res.json()
-                                        
-                                        if up_data.get("status") == "success":
-                                            st.success("✅ Furniture Quotation Compiled Successfully!")
-                                            st.session_state.doc_url = response_data['docUrl']
-                                            st.session_state.pdf_url = up_data['pdfUrl']
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Failed to save final PDF: {up_data.get('message')}")
+                                    st.success("✅ Quotation Generated Successfully!")
+                                    st.session_state.doc_url = response_data.get("docUrl")
+                                    st.session_state.pdf_url = response_data.get("pdfUrl")
+                                    st.rerun()
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
                             else:
