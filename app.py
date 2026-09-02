@@ -87,16 +87,20 @@ AC_RATE_CATALOG = (
 
 
 def ac_configuration_key(configuration):
-    """Return the unique selectable equipment combination."""
+    """Return the unique room-and-equipment combination."""
+    normalized_room = " ".join(str(configuration["Room"]).split()).casefold()
     return "|".join(
-        str(configuration[field])
-        for field in (
+        [normalized_room]
+        + [
+            str(configuration[field])
+            for field in (
             "Model",
             "Type",
             "Installation Type",
             "Cooling",
             "Horse Power",
-        )
+            )
+        ]
     )
 
 
@@ -124,6 +128,7 @@ def build_ac_line_items(configuration):
     horsepower_label = f"{horsepower:g}"
     config_key = ac_configuration_key(configuration)
     metadata = {
+        "Room": configuration["Room"],
         "Model": configuration["Model"],
         "Type": configuration["Type"],
         "Installation Type": configuration["Installation Type"],
@@ -138,10 +143,10 @@ def build_ac_line_items(configuration):
             **metadata,
             "Component": "A.C Unit",
             "Description": (
-                f"Supply and install {configuration['Model']} "
-                f"{configuration['Type']} {configuration['Installation Type']} "
-                f"air-conditioning unit, {configuration['Cooling']}, "
-                f"{horsepower_label} HP."
+                f"Supply and install {horsepower_label} HP "
+                f"{configuration['Model']} {configuration['Type'].lower()} "
+                f"{configuration['Installation Type'].lower()} A.C unit "
+                f"({configuration['Cooling']}) for {configuration['Room']}."
             ),
             "Unit": "NO.",
             "QTY": float(unit_qty),
@@ -154,7 +159,7 @@ def build_ac_line_items(configuration):
             "Description": (
                 f"Supply and install refrigerant (Freon) piping for "
                 f"{configuration['Model']} {horsepower_label} HP "
-                "air-conditioning unit."
+                f"air-conditioning unit serving {configuration['Room']}."
             ),
             "Unit": "M",
             "QTY": float(unit_qty) * freon_meters,
@@ -173,7 +178,8 @@ def build_ac_line_items(configuration):
                     "Description": (
                         "Supply and install ductwork and insulation for "
                         f"{configuration['Model']} {horsepower_label} HP "
-                        "concealed air-conditioning unit."
+                        f"concealed air-conditioning unit serving "
+                        f"{configuration['Room']}."
                     ),
                     "Unit": "NO.",
                     "QTY": float(unit_qty),
@@ -186,7 +192,7 @@ def build_ac_line_items(configuration):
                     "Description": (
                         "Supply and install air-conditioning grille for "
                         f"{configuration['Model']} {horsepower_label} HP "
-                        "concealed unit."
+                        f"concealed unit serving {configuration['Room']}."
                     ),
                     "Unit": "M",
                     "QTY": float(unit_qty) * grille_meters,
@@ -197,6 +203,142 @@ def build_ac_line_items(configuration):
         )
 
     return lines
+
+
+def build_ac_detailed_scope_rows(configurations):
+    """Build the final-page HVAC table with quantities and no commercial rates."""
+    if not configurations:
+        return []
+
+    total_freon_meters = sum(
+        int(configuration["Unit QTY"])
+        * float(configuration["Freon Meters per Unit"])
+        for configuration in configurations
+    )
+    concealed_configurations = [
+        configuration
+        for configuration in configurations
+        if configuration["Installation Type"] == "Concealed"
+    ]
+    total_grille_meters = sum(
+        int(configuration["Unit QTY"])
+        * float(configuration["Grille Meters per Unit"])
+        for configuration in concealed_configurations
+    )
+
+    rows = [
+        {
+            "No.": "",
+            "Item": "HVAC WORKS",
+            "Unit": "",
+            "QTY": "",
+            "Rate": "",
+            "Total (EGP)": "",
+            "Row Type": "section",
+        },
+        {
+            "No.": "1",
+            "Item": "Refrigerant Pipes",
+            "Unit": "",
+            "QTY": "",
+            "Rate": "",
+            "Total (EGP)": "",
+            "Row Type": "section",
+        },
+        {
+            "No.": "1.1",
+            "Item": (
+                "Supply and install refrigerant pipes for the selected "
+                "A.C units."
+            ),
+            "Unit": "m",
+            "QTY": total_freon_meters,
+            "Rate": "",
+            "Total (EGP)": "",
+            "Row Type": "item",
+        },
+        {
+            "No.": "2",
+            "Item": "A.C Units",
+            "Unit": "",
+            "QTY": "",
+            "Rate": "",
+            "Total (EGP)": "",
+            "Row Type": "section",
+        },
+    ]
+
+    for item_number, configuration in enumerate(configurations, start=1):
+        horsepower_label = f"{float(configuration['Horse Power']):g}"
+        rows.append(
+            {
+                "No.": f"2.{item_number}",
+                "Item": (
+                    f"Supply and install {horsepower_label} HP "
+                    f"{configuration['Model']} "
+                    f"{configuration['Type'].lower()} "
+                    f"{configuration['Installation Type'].lower()} A.C unit "
+                    f"({configuration['Cooling']}) for "
+                    f"{configuration['Room']}."
+                ),
+                "Unit": "NO.",
+                "QTY": int(configuration["Unit QTY"]),
+                "Rate": "",
+                "Total (EGP)": "",
+                "Row Type": "item",
+            }
+        )
+
+    if concealed_configurations:
+        rows.extend(
+            [
+                {
+                    "No.": "3",
+                    "Item": "Ductwork & Accessories",
+                    "Unit": "",
+                    "QTY": "",
+                    "Rate": "",
+                    "Total (EGP)": "",
+                    "Row Type": "section",
+                },
+                {
+                    "No.": "3.1",
+                    "Item": (
+                        "Supply and install A.C grilles as per attached design."
+                    ),
+                    "Unit": "Lm",
+                    "QTY": total_grille_meters,
+                    "Rate": "",
+                    "Total (EGP)": "",
+                    "Row Type": "item",
+                },
+                {
+                    "No.": "3.2",
+                    "Item": (
+                        "Supply and install ductwork with required insulation "
+                        "as per attached design."
+                    ),
+                    "Unit": "LS",
+                    "QTY": 1,
+                    "Rate": "",
+                    "Total (EGP)": "",
+                    "Row Type": "item",
+                },
+            ]
+        )
+
+    rows.append(
+        {
+            "No.": "",
+            "Item": "TOTAL",
+            "Unit": "",
+            "QTY": "",
+            "Rate": "",
+            "Total (EGP)": "",
+            "Row Type": "total",
+        }
+    )
+    return rows
 
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
@@ -1288,10 +1430,11 @@ if df_fact is not None and not df_fact.empty:
             "installation lengths. All displayed rates are selling rates."
         )
 
-        ac_context = f"{selected_unit}|ac_configurator_v1"
+        ac_context = f"{selected_unit}|ac_configurator_v2"
         if st.session_state.get("ac_context") != ac_context:
             st.session_state.ac_context = ac_context
             st.session_state.ac_configurations = []
+            st.session_state.ac_detailed_scope_items = []
             st.session_state.ac_selection_revision = 0
             st.session_state.staged_items = []
 
@@ -1303,7 +1446,13 @@ if df_fact is not None and not df_fact.empty:
         if "ac_selection_revision" not in st.session_state:
             st.session_state.ac_selection_revision = 0
 
-        st.markdown("##### 1. Select A.C Equipment")
+        st.markdown("##### 1. Room & Equipment")
+        ac_room = st.text_input(
+            "Room / Location",
+            placeholder="e.g. Reception, Master Bedroom, Kitchen",
+            key=f"ac_room_{st.session_state.ac_selection_revision}",
+        )
+
         selector_col1, selector_col2, selector_col3, selector_col4, selector_col5 = (
             st.columns(5)
         )
@@ -1448,6 +1597,7 @@ if df_fact is not None and not df_fact.empty:
 
         preview_configuration = {
             **selected_catalog_item,
+            "Room": " ".join(ac_room.split()),
             "Unit QTY": int(ac_unit_qty),
             "Freon Meters per Unit": float(freon_meters_per_unit),
             "Grille Meters per Unit": (
@@ -1501,18 +1651,21 @@ if df_fact is not None and not df_fact.empty:
         duplicate_configuration = (
             selected_configuration_key in existing_configuration_keys
         )
+        missing_room = not preview_configuration["Room"]
 
-        if duplicate_configuration:
+        if missing_room:
+            st.warning("Room / Location is required before adding the configuration.")
+        elif duplicate_configuration:
             st.warning(
-                "This exact A.C configuration is already in the quotation. "
+                "This exact A.C configuration already exists for this room. "
                 "Remove it first if you need to replace its quantity or lengths."
             )
 
         if st.button(
-            "➕ Add A.C Configuration",
+            "➕ Add Room Configuration",
             type="primary",
             use_container_width=True,
-            disabled=duplicate_configuration,
+            disabled=missing_room or duplicate_configuration,
         ):
             st.session_state.ac_configurations.append(
                 preview_configuration.copy()
@@ -1523,19 +1676,23 @@ if df_fact is not None and not df_fact.empty:
         st.markdown("##### 3. Selected A.C Configurations")
         if not st.session_state.ac_configurations:
             st.info("No A.C configuration has been added yet.")
+            st.session_state.ac_detailed_scope_items = []
             st.session_state.staged_items = []
         else:
             for configuration_index, configuration in enumerate(
                 st.session_state.ac_configurations
             ):
-                summary_columns = st.columns([4, 2, 2, 1])
+                summary_columns = st.columns([2, 4, 2, 2, 1])
                 summary_columns[0].markdown(
+                    f"**{configuration['Room']}**"
+                )
+                summary_columns[1].markdown(
                     f"**{configuration['Model']} · {configuration['Type']} · "
                     f"{configuration['Installation Type']} · "
                     f"{configuration['Cooling']} · "
                     f"{float(configuration['Horse Power']):g} HP**"
                 )
-                summary_columns[1].write(
+                summary_columns[2].write(
                     f"Units: {int(configuration['Unit QTY'])}"
                 )
                 length_summary = (
@@ -1546,8 +1703,8 @@ if df_fact is not None and not df_fact.empty:
                         f" · Grille: "
                         f"{float(configuration['Grille Meters per Unit']):g} m/unit"
                     )
-                summary_columns[2].write(length_summary)
-                if summary_columns[3].button(
+                summary_columns[3].write(length_summary)
+                if summary_columns[4].button(
                     "Remove",
                     key=(
                         f"remove_ac_configuration_"
@@ -1559,16 +1716,16 @@ if df_fact is not None and not df_fact.empty:
                     st.session_state.ac_selection_revision += 1
                     st.rerun()
 
-            ac_staged_items = []
+            ac_internal_items = []
             for configuration in st.session_state.ac_configurations:
-                ac_staged_items.extend(build_ac_line_items(configuration))
+                ac_internal_items.extend(build_ac_line_items(configuration))
 
-            for item_number, item in enumerate(ac_staged_items, start=1):
+            for item_number, item in enumerate(ac_internal_items, start=1):
                 item["No."] = item_number
-            st.session_state.staged_items = ac_staged_items
 
             result_columns = [
                 "No.",
+                "Room",
                 "Component",
                 "Model",
                 "Type",
@@ -1582,7 +1739,7 @@ if df_fact is not None and not df_fact.empty:
                 "Total Amount",
             ]
             st.dataframe(
-                pd.DataFrame(st.session_state.staged_items)[result_columns],
+                pd.DataFrame(ac_internal_items)[result_columns],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -1607,7 +1764,31 @@ if df_fact is not None and not df_fact.empty:
 
             ac_subtotal = sum(
                 float(item["Total Amount"])
-                for item in st.session_state.staged_items
+                for item in ac_internal_items
+            )
+            st.session_state.ac_detailed_scope_items = (
+                build_ac_detailed_scope_rows(
+                    st.session_state.ac_configurations
+                )
+            )
+            st.session_state.staged_items = [
+                {
+                    "No.": 1,
+                    "Description": (
+                        "Required fees for supplying and installing A.C works "
+                        "as per the attached detailed scope."
+                    ),
+                    "Unit": "LS",
+                    "QTY": 1.0,
+                    "Rate": ac_subtotal,
+                    "Total Amount": ac_subtotal,
+                    "Lookup Name": "A.C",
+                }
+            ]
+
+            st.info(
+                "The commercial quotation will show one lump-sum A.C value. "
+                "The unpriced detailed HVAC table will be added on the last page."
             )
             ac_vat = ac_subtotal * 0.14
             ac_total_with_vat = ac_subtotal + ac_vat
@@ -1627,6 +1808,7 @@ if df_fact is not None and not df_fact.empty:
                 use_container_width=True,
             ):
                 st.session_state.ac_configurations = []
+                st.session_state.ac_detailed_scope_items = []
                 st.session_state.staged_items = []
                 st.session_state.ac_selection_revision += 1
                 st.rerun()
@@ -2267,6 +2449,14 @@ if df_fact is not None and not df_fact.empty:
                             
                         if selected_request_type == "Furniture":
                             payload["requestCategory"] = "Furniture"
+                        elif selected_request_type == "A.C":
+                            payload["requestCategory"] = "A.C"
+                            payload["detailedScopeItems"] = (
+                                st.session_state.get(
+                                    "ac_detailed_scope_items",
+                                    [],
+                                )
+                            )
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
