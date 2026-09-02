@@ -206,7 +206,7 @@ def build_ac_line_items(configuration):
 
 
 def build_ac_detailed_scope_rows(configurations):
-    """Build the final-page HVAC table with quantities and no commercial rates."""
+    """Build the HVAC scope once; Apps Script controls whether prices are shown."""
     if not configurations:
         return []
 
@@ -223,6 +223,10 @@ def build_ac_detailed_scope_rows(configurations):
     total_grille_meters = sum(
         int(configuration["Unit QTY"])
         * float(configuration["Grille Meters per Unit"])
+        for configuration in concealed_configurations
+    )
+    total_ductwork = sum(
+        int(configuration["Unit QTY"]) * AC_CONCEALED_DUCT_RATE
         for configuration in concealed_configurations
     )
 
@@ -253,8 +257,8 @@ def build_ac_detailed_scope_rows(configurations):
             ),
             "Unit": "m",
             "QTY": total_freon_meters,
-            "Rate": "",
-            "Total (EGP)": "",
+            "Rate": AC_FREON_PIPE_RATE,
+            "Total (EGP)": total_freon_meters * AC_FREON_PIPE_RATE,
             "Row Type": "item",
         },
         {
@@ -270,6 +274,11 @@ def build_ac_detailed_scope_rows(configurations):
 
     for item_number, configuration in enumerate(configurations, start=1):
         horsepower_label = f"{float(configuration['Horse Power']):g}"
+        equipment_selling_rate = round(
+            float(configuration["Dry Cost"]) / AC_DRY_COST_FACTOR,
+            2,
+        )
+        equipment_quantity = int(configuration["Unit QTY"])
         rows.append(
             {
                 "No.": f"2.{item_number}",
@@ -282,9 +291,9 @@ def build_ac_detailed_scope_rows(configurations):
                     f"{configuration['Room']}."
                 ),
                 "Unit": "NO.",
-                "QTY": int(configuration["Unit QTY"]),
-                "Rate": "",
-                "Total (EGP)": "",
+                "QTY": equipment_quantity,
+                "Rate": equipment_selling_rate,
+                "Total (EGP)": equipment_quantity * equipment_selling_rate,
                 "Row Type": "item",
             }
         )
@@ -308,8 +317,8 @@ def build_ac_detailed_scope_rows(configurations):
                     ),
                     "Unit": "Lm",
                     "QTY": total_grille_meters,
-                    "Rate": "",
-                    "Total (EGP)": "",
+                    "Rate": AC_GRILLE_RATE,
+                    "Total (EGP)": total_grille_meters * AC_GRILLE_RATE,
                     "Row Type": "item",
                 },
                 {
@@ -320,8 +329,8 @@ def build_ac_detailed_scope_rows(configurations):
                     ),
                     "Unit": "LS",
                     "QTY": 1,
-                    "Rate": "",
-                    "Total (EGP)": "",
+                    "Rate": total_ductwork,
+                    "Total (EGP)": total_ductwork,
                     "Row Type": "item",
                 },
             ]
@@ -334,7 +343,11 @@ def build_ac_detailed_scope_rows(configurations):
             "Unit": "",
             "QTY": "",
             "Rate": "",
-            "Total (EGP)": "",
+            "Total (EGP)": sum(
+                float(row["Total (EGP)"])
+                for row in rows
+                if row["Row Type"] == "item"
+            ),
             "Row Type": "total",
         }
     )
@@ -399,11 +412,17 @@ if 'doc_url' not in st.session_state:
     st.session_state.doc_url = None
 if 'pdf_url' not in st.session_state:
     st.session_state.pdf_url = None
+if 'ac_breakdown_doc_url' not in st.session_state:
+    st.session_state.ac_breakdown_doc_url = None
+if 'ac_breakdown_pdf_url' not in st.session_state:
+    st.session_state.ac_breakdown_pdf_url = None
 
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
     st.session_state.doc_url = None
     st.session_state.pdf_url = None
+    st.session_state.ac_breakdown_doc_url = None
+    st.session_state.ac_breakdown_pdf_url = None
     st.rerun()
 
 st.title("🏗️ Extra Works Quotation Engine")
@@ -1430,6 +1449,20 @@ if df_fact is not None and not df_fact.empty:
             "installation lengths. All displayed rates are selling rates."
         )
 
+        attach_priced_ac_scope = st.checkbox(
+            "Include prices in the detailed scope attached to the quotation",
+            value=False,
+            help=(
+                "Normally leave this unchecked. A separate priced breakdown "
+                "file is always generated."
+            ),
+            key=f"attach_priced_ac_scope_{selected_unit}",
+        )
+        st.caption(
+            "A separate priced breakdown (Google Doc and PDF) will always be "
+            "generated with the same quotation number."
+        )
+
         ac_context = f"{selected_unit}|ac_configurator_v2"
         if st.session_state.get("ac_context") != ac_context:
             st.session_state.ac_context = ac_context
@@ -1788,7 +1821,10 @@ if df_fact is not None and not df_fact.empty:
 
             st.info(
                 "The commercial quotation will show one lump-sum A.C value. "
-                "The unpriced detailed HVAC table will be added on the last page."
+                "The detailed HVAC table on its last page will be "
+                f"{'priced' if attach_priced_ac_scope else 'unpriced'}. "
+                "A separate priced breakdown file is mandatory and will also "
+                "be generated."
             )
             ac_vat = ac_subtotal * 0.14
             ac_total_with_vat = ac_subtotal + ac_vat
@@ -2451,6 +2487,12 @@ if df_fact is not None and not df_fact.empty:
                             payload["requestCategory"] = "Furniture"
                         elif selected_request_type == "A.C":
                             payload["requestCategory"] = "A.C"
+                            payload["priceAttachedDetailedScope"] = bool(
+                                st.session_state.get(
+                                    f"attach_priced_ac_scope_{selected_unit}",
+                                    False,
+                                )
+                            )
                             payload["detailedScopeItems"] = (
                                 st.session_state.get(
                                     "ac_detailed_scope_items",
@@ -2470,6 +2512,12 @@ if df_fact is not None and not df_fact.empty:
                                     st.success("✅ Quotation Generated Successfully!")
                                     st.session_state.doc_url = response_data.get("docUrl")
                                     st.session_state.pdf_url = response_data.get("pdfUrl")
+                                    st.session_state.ac_breakdown_doc_url = (
+                                        response_data.get("pricedBreakdownDocUrl")
+                                    )
+                                    st.session_state.ac_breakdown_pdf_url = (
+                                        response_data.get("pricedBreakdownPdfUrl")
+                                    )
                                     st.rerun()
                                 else:
                                     st.error(f"Apps Script Error: {response_data.get('message')}")
@@ -2597,5 +2645,24 @@ if df_fact is not None and not df_fact.empty:
                     """.replace("URL_PLACEHOLDER", st.session_state.pdf_url).replace("UNIT_PLACEHOLDER", selected_unit)
                     
                     st.components.v1.html(js_share_component, height=55)
+
+                if (
+                    st.session_state.ac_breakdown_doc_url
+                    and st.session_state.ac_breakdown_pdf_url
+                ):
+                    st.markdown("#### 📊 Mandatory A.C Priced Breakdown")
+                    breakdown_col1, breakdown_col2 = st.columns(2)
+                    with breakdown_col1:
+                        st.link_button(
+                            "📄 Open Priced Breakdown",
+                            st.session_state.ac_breakdown_doc_url,
+                            use_container_width=True,
+                        )
+                    with breakdown_col2:
+                        st.link_button(
+                            "💾 View / Download Priced Breakdown PDF",
+                            st.session_state.ac_breakdown_pdf_url,
+                            use_container_width=True,
+                        )
 else:
     st.info("Awaiting structural backend database connection strings...")

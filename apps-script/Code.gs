@@ -656,11 +656,28 @@ function convertNumberToWords(amount) {
 // 6. WEBHOOK LISTENER (FOR STREAMLIT UI)
 // ==========================================
 
-function appendAcDetailedScope(body, scopeItems, unitId) {
+function formatAcScopeAmount(value) {
+  if (value === "" || value == null) return "";
+  const numericValue = Number(value);
+  if (isNaN(numericValue)) return "";
+  return numericValue.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function appendAcDetailedScope(
+  body,
+  scopeItems,
+  unitId,
+  includePrices,
+  startOnNewPage,
+  headingText
+) {
   if (!Array.isArray(scopeItems) || scopeItems.length === 0) return;
 
-  body.appendPageBreak();
-  body.appendParagraph("Detailed Scope of Work")
+  if (startOnNewPage !== false) body.appendPageBreak();
+  body.appendParagraph(headingText || "Detailed Scope of Work")
       .setHeading(DocumentApp.ParagraphHeading.HEADING2)
       .setFontFamily(CONFIG.FONT_FAMILY)
       .setBold(true)
@@ -675,15 +692,13 @@ function appendAcDetailedScope(body, scopeItems, unitId) {
 
   const tableRows = [["No.", "Item", "Unit", "Qty", "Rate", "Total (EGP)"]];
   scopeItems.forEach(item => {
-    // Rate and Total are deliberately forced blank here. The detailed scope
-    // must never expose or duplicate the internal commercial calculation.
     tableRows.push([
       String(item["No."] || ""),
       String(item["Item"] || ""),
       String(item["Unit"] || ""),
       item["QTY"] === "" || item["QTY"] == null ? "" : String(item["QTY"]),
-      "",
-      ""
+      includePrices ? formatAcScopeAmount(item["Rate"]) : "",
+      includePrices ? formatAcScopeAmount(item["Total (EGP)"]) : ""
     ]);
   });
 
@@ -732,6 +747,69 @@ function appendAcDetailedScope(body, scopeItems, unitId) {
   table.setColumnWidth(3, 43.2);
   table.setColumnWidth(4, 57.6);
   table.setColumnWidth(5, 72.0);
+}
+
+function createAcPricedBreakdown(
+  scopeItems,
+  unitId,
+  clientName,
+  quotationName,
+  formattedDate,
+  destFolder,
+  pdfFolder
+) {
+  if (!Array.isArray(scopeItems) || scopeItems.length === 0) {
+    throw new Error("A.C priced breakdown cannot be generated without scope items.");
+  }
+
+  const breakdownName = quotationName + " - Priced Breakdown";
+  const breakdownDoc = DocumentApp.create(breakdownName);
+  const breakdownDocId = breakdownDoc.getId();
+  const breakdownDocFile = DriveApp.getFileById(breakdownDocId);
+  breakdownDocFile.moveTo(destFolder);
+
+  const breakdownBody = breakdownDoc.getBody();
+  breakdownBody.clear();
+  appendAcDetailedScope(
+    breakdownBody,
+    scopeItems,
+    unitId,
+    true,
+    false,
+    "A.C Priced Breakdown"
+  );
+  breakdownBody.insertParagraph(2, "Client: " + (clientName || ""))
+      .setFontFamily(CONFIG.FONT_FAMILY)
+      .setFontSize(10);
+  breakdownBody.insertParagraph(3, "Date: " + formattedDate)
+      .setFontFamily(CONFIG.FONT_FAMILY)
+      .setFontSize(10);
+  breakdownDoc.saveAndClose();
+
+  const breakdownPdfBlob = breakdownDocFile.getAs(MimeType.PDF);
+  const breakdownPdfFile = pdfFolder.createFile(breakdownPdfBlob);
+  breakdownPdfFile.setName(breakdownName + ".pdf");
+
+  try {
+    breakdownDocFile.setSharing(
+      DriveApp.Access.ANYONE_WITH_LINK,
+      DriveApp.Permission.VIEW
+    );
+    breakdownPdfFile.setSharing(
+      DriveApp.Access.ANYONE_WITH_LINK,
+      DriveApp.Permission.VIEW
+    );
+  } catch (sharingError) {
+    console.warn(
+      "Sharing permission blocked by Workspace, but the priced breakdown was created successfully."
+    );
+  }
+
+  return {
+    docUrl: breakdownDocFile.getUrl(),
+    pdfUrl: breakdownPdfFile.getUrl(),
+    name: breakdownName
+  };
 }
 
 function doPost(e) {
@@ -974,15 +1052,33 @@ function doPost(e) {
     }
 
     if (isAc) {
+      if (!Array.isArray(payload.detailedScopeItems) || payload.detailedScopeItems.length === 0) {
+        throw new Error("A.C quotation requires detailed scope items for the mandatory breakdown.");
+      }
+      const includeAttachedScopePrices = payload.priceAttachedDetailedScope === true;
       appendAcDetailedScope(
         body,
-        payload.detailedScopeItems || [],
-        payload.unitId || ""
+        payload.detailedScopeItems,
+        payload.unitId || "",
+        includeAttachedScopePrices,
+        true,
+        "Detailed Scope of Work"
       );
     }
 
     doc.saveAndClose();
     const docUrl = doc.getUrl();
+    const acPricedBreakdown = isAc
+      ? createAcPricedBreakdown(
+          payload.detailedScopeItems,
+          payload.unitId || "",
+          payload.clientName || "",
+          docName,
+          formattedDate,
+          destFolder,
+          pdfFolder
+        )
+      : null;
 
     // --- PART C: ACTION HANDLING (PYTHON MERGING OR STANDARD PDF EXTRACT) ---
     if (action === "generateDocOnly") {
@@ -1044,7 +1140,9 @@ function doPost(e) {
         roomBase64s: roomBase64s,
         missingRoomPdfs: missingRoomPdfs,
         serialNumber: serialNumber,
-        grandTotal: grandTotal
+        grandTotal: grandTotal,
+        pricedBreakdownDocUrl: acPricedBreakdown ? acPricedBreakdown.docUrl : null,
+        pricedBreakdownPdfUrl: acPricedBreakdown ? acPricedBreakdown.pdfUrl : null
       })).setMimeType(ContentService.MimeType.JSON);
 
     } else {
@@ -1077,7 +1175,9 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({
         status: "success", 
         docUrl: docUrl,
-        pdfUrl: pdfUrl
+        pdfUrl: pdfUrl,
+        pricedBreakdownDocUrl: acPricedBreakdown ? acPricedBreakdown.docUrl : null,
+        pricedBreakdownPdfUrl: acPricedBreakdown ? acPricedBreakdown.pdfUrl : null
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
