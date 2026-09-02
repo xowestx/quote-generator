@@ -652,6 +652,84 @@ function convertNumberToWords(amount) {
   return convertInteger(Math.floor(amount)) || "Zero";
 }
 
+function appendAcDetailedScope(body, scopeItems, unitId) {
+  if (!Array.isArray(scopeItems) || scopeItems.length === 0) return;
+
+  body.appendPageBreak();
+  body.appendParagraph("Detailed Scope of Work")
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2)
+      .setFontFamily(CONFIG.FONT_FAMILY)
+      .setBold(true)
+      .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  body.appendParagraph("Project: " + (unitId || ""))
+      .setFontFamily(CONFIG.FONT_FAMILY)
+      .setFontSize(10);
+  body.appendParagraph("Scope: HVAC Works")
+      .setFontFamily(CONFIG.FONT_FAMILY)
+      .setFontSize(10);
+  body.appendParagraph("");
+
+  const tableRows = [["No.", "Item", "Unit", "Qty", "Rate", "Total (EGP)"]];
+  scopeItems.forEach(item => {
+    // Rate and Total are deliberately forced blank here. The detailed scope
+    // must never expose or duplicate the internal commercial calculation.
+    tableRows.push([
+      String(item["No."] || ""),
+      String(item["Item"] || ""),
+      String(item["Unit"] || ""),
+      item["QTY"] === "" || item["QTY"] == null ? "" : String(item["QTY"]),
+      "",
+      ""
+    ]);
+  });
+
+  const table = body.appendTable(tableRows);
+  table.setAttributes({
+    [DocumentApp.Attribute.FONT_FAMILY]: CONFIG.FONT_FAMILY,
+    [DocumentApp.Attribute.FONT_SIZE]: 9
+  });
+
+  for (let rowIndex = 0; rowIndex < table.getNumRows(); rowIndex++) {
+    const row = table.getRow(rowIndex);
+    const scopeItem = rowIndex > 0 ? scopeItems[rowIndex - 1] : null;
+    const rowType = scopeItem ? String(scopeItem["Row Type"] || "item") : "header";
+
+    for (let cellIndex = 0; cellIndex < row.getNumCells(); cellIndex++) {
+      const cell = row.getCell(cellIndex);
+      cell.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
+      cell.setPaddingTop(2);
+      cell.setPaddingBottom(2);
+      cell.setPaddingLeft(2);
+      cell.setPaddingRight(2);
+
+      if (rowType === "section") {
+        cell.setBackgroundColor("#EDEDED");
+      }
+
+      const alignment = cellIndex === 1 && rowType === "item"
+        ? DocumentApp.HorizontalAlignment.LEFT
+        : DocumentApp.HorizontalAlignment.CENTER;
+      for (let childIndex = 0; childIndex < cell.getNumChildren(); childIndex++) {
+        const child = cell.getChild(childIndex);
+        if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+          child.asParagraph().setAlignment(alignment);
+        }
+      }
+    }
+
+    if (rowType === "header" || rowType === "section" || rowType === "total") {
+      row.setAttributes({ [DocumentApp.Attribute.BOLD]: true });
+    }
+  }
+
+  table.setColumnWidth(0, 36.0);
+  table.setColumnWidth(1, 300.0);
+  table.setColumnWidth(2, 43.2);
+  table.setColumnWidth(3, 43.2);
+  table.setColumnWidth(4, 57.6);
+  table.setColumnWidth(5, 72.0);
+}
+
 // ==========================================
 // 6. WEBHOOK LISTENER (FOR STREAMLIT UI)
 // ==========================================
@@ -670,6 +748,8 @@ function doPost(e) {
     // with "1 Bedroom", "2 Bedrooms", etc.
     const isFurniture = String(payload.requestCategory || "").toUpperCase() === "FURNITURE"
       || /^\d+\s+BEDROOM/.test(reqTypeStr);
+    const isAc = String(payload.requestCategory || "").toUpperCase() === "A.C"
+      || reqTypeStr === "A.C";
 
     const destFolderId = isFurniture ? CONFIG.FURNITURE_DOC_FOLDER_ID : CONFIG.DESTINATION_FOLDER_ID;
     const pdfFolderId = isFurniture ? CONFIG.FURNITURE_PDF_FOLDER_ID : CONFIG.PDF_DESTINATION_FOLDER_ID;
@@ -891,6 +971,14 @@ function doPost(e) {
       table.setColumnWidth(3, 23.76);   // Qty (0.33")
       table.setColumnWidth(4, 72.576);  // Rate (1.008")
       table.setColumnWidth(5, 81.36);   // Total (1.13")
+    }
+
+    if (isAc) {
+      appendAcDetailedScope(
+        body,
+        payload.detailedScopeItems || [],
+        payload.unitId || ""
+      );
     }
 
     doc.saveAndClose();
