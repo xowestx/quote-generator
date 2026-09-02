@@ -971,6 +971,7 @@ function doPost(e) {
       table.setColumnWidth(3, 23.76);   // Qty (0.33")
       table.setColumnWidth(4, 72.576);  // Rate (1.008")
       table.setColumnWidth(5, 81.36);   // Total (1.13")
+    }
 
     if (isAc) {
       appendAcDetailedScope(
@@ -978,7 +979,6 @@ function doPost(e) {
         payload.detailedScopeItems || [],
         payload.unitId || ""
       );
-    }
     }
 
     doc.saveAndClose();
