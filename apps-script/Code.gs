@@ -652,6 +652,10 @@ function convertNumberToWords(amount) {
   return convertInteger(Math.floor(amount)) || "Zero";
 }
 
+// ==========================================
+// 6. WEBHOOK LISTENER (FOR STREAMLIT UI)
+// ==========================================
+
 function appendAcDetailedScope(body, scopeItems, unitId) {
   if (!Array.isArray(scopeItems) || scopeItems.length === 0) return;
 
@@ -729,10 +733,6 @@ function appendAcDetailedScope(body, scopeItems, unitId) {
   table.setColumnWidth(4, 57.6);
   table.setColumnWidth(5, 72.0);
 }
-
-// ==========================================
-// 6. WEBHOOK LISTENER (FOR STREAMLIT UI)
-// ==========================================
 
 function doPost(e) {
   try {
@@ -971,7 +971,6 @@ function doPost(e) {
       table.setColumnWidth(3, 23.76);   // Qty (0.33")
       table.setColumnWidth(4, 72.576);  // Rate (1.008")
       table.setColumnWidth(5, 81.36);   // Total (1.13")
-    }
 
     if (isAc) {
       appendAcDetailedScope(
@@ -979,6 +978,7 @@ function doPost(e) {
         payload.detailedScopeItems || [],
         payload.unitId || ""
       );
+    }
     }
 
     doc.saveAndClose();
