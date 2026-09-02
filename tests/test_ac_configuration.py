@@ -263,7 +263,7 @@ class ACConfigurationTests(unittest.TestCase):
                 "Total Amount",'''
         self.assertIn(required_order, self.ac_section)
 
-    def test_detailed_scope_is_grouped_and_has_no_rates(self):
+    def test_detailed_scope_is_grouped_and_contains_authoritative_prices(self):
         concealed = {
             **self.find_item(
                 Model="Carrier",
@@ -313,8 +313,14 @@ class ACConfigurationTests(unittest.TestCase):
         grille_row = next(row for row in rows if row["No."] == "3.1")
         self.assertEqual(refrigerant_row["QTY"], 34.0)
         self.assertEqual(grille_row["QTY"], 10.0)
-        self.assertTrue(all(row["Rate"] == "" for row in rows))
-        self.assertTrue(all(row["Total (EGP)"] == "" for row in rows))
+        self.assertEqual(refrigerant_row["Rate"], 1176.4)
+        self.assertEqual(grille_row["Rate"], 2353.0)
+        item_total = sum(
+            float(row["Total (EGP)"])
+            for row in rows
+            if row["Row Type"] == "item"
+        )
+        self.assertEqual(rows[-1]["Total (EGP)"], item_total)
         self.assertIn("Master Bedroom", rows[4]["Item"])
 
     def test_commercial_quotation_is_one_lump_sum_line(self):
@@ -340,14 +346,26 @@ class ACConfigurationTests(unittest.TestCase):
         self.assertIn('"Lookup Name": "A.C"', self.app_source)
         self.assertIn('payload["requestCategory"] = "A.C"', self.app_source)
         self.assertIn('payload["detailedScopeItems"]', self.app_source)
+        self.assertIn('payload["priceAttachedDetailedScope"]', self.app_source)
 
-    def test_apps_script_appends_scope_as_last_page_and_forces_blank_prices(self):
+    def test_attached_scope_pricing_checkbox_defaults_to_unchecked(self):
+        checkbox_start = self.ac_section.index(
+            '"Include prices in the detailed scope attached to the quotation"'
+        )
+        checkbox_block = self.ac_section[checkbox_start:checkbox_start + 500]
+        self.assertIn("value=False", checkbox_block)
+        self.assertIn(
+            "A separate priced breakdown (Google Doc and PDF) will always be",
+            self.ac_section,
+        )
+
+    def test_apps_script_controls_attached_prices_and_makes_breakdown_mandatory(self):
         self.assertIn("function appendAcDetailedScope(", self.script_source)
         self.assertIn("body.appendPageBreak();", self.script_source)
         self.assertIn('"Detailed Scope of Work"', self.script_source)
         self.assertIn('"Total (EGP)"', self.script_source)
         self.assertIn(
-            'payload.detailedScopeItems || []',
+            "payload.detailedScopeItems,",
             self.script_source,
         )
         helper = self.script_source.split(
@@ -357,9 +375,30 @@ class ACConfigurationTests(unittest.TestCase):
             "// ==========================================",
             1,
         )[0]
-        self.assertIn('"",\n      ""', helper)
-        self.assertNotIn('item["Rate"]', helper)
-        self.assertNotIn('item["Total (EGP)"]', helper)
+        self.assertIn(
+            'includePrices ? formatAcScopeAmount(item["Rate"]) : ""',
+            helper,
+        )
+        self.assertIn(
+            'includePrices ? formatAcScopeAmount(item["Total (EGP)"]) : ""',
+            helper,
+        )
+        self.assertIn("function createAcPricedBreakdown(", self.script_source)
+        self.assertIn(
+            'quotationName + " - Priced Breakdown"',
+            self.script_source,
+        )
+        self.assertIn(
+            "A.C quotation requires detailed scope items for the mandatory breakdown.",
+            self.script_source,
+        )
+        self.assertIn(
+            "const includeAttachedScopePrices = payload.priceAttachedDetailedScope === true;",
+            self.script_source,
+        )
+        self.assertIn("const acPricedBreakdown = isAc", self.script_source)
+        self.assertIn("pricedBreakdownDocUrl", self.script_source)
+        self.assertIn("pricedBreakdownPdfUrl", self.script_source)
 
 
 if __name__ == "__main__":
