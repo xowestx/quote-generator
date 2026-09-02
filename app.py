@@ -37,6 +37,167 @@ FURNITURE_RATES = {
 
 LAND_EXTENSION_RATES = (55000.0, 65000.0)
 
+# A.C equipment source rates are dry cost. Quotations always use the selling
+# rate (dry cost / 0.85). The accessories below are already selling rates.
+AC_DRY_COST_FACTOR = 0.85
+AC_FREON_PIPE_RATE = 1176.4
+AC_CONCEALED_DUCT_RATE = 10588.2
+AC_GRILLE_RATE = 2353.0
+AC_FREON_METERS_MIN = 10.0
+AC_FREON_METERS_MAX = 15.0
+AC_GRILLE_METERS_MIN = 4.0
+AC_GRILLE_METERS_MAX = 6.0
+
+AC_RATE_CATALOG = (
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 1.5, "Dry Cost": 28640.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 2.25, "Dry Cost": 44025.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 3.0, "Dry Cost": 50000.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 1.5, "Dry Cost": 31205.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 2.25, "Dry Cost": 47610.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 3.0, "Dry Cost": 54055.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 1.5, "Dry Cost": 26985.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 2.25, "Dry Cost": 40530.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 2.25, "Dry Cost": 56010.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 3.0, "Dry Cost": 64525.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 5.0, "Dry Cost": 95185.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 6.0, "Dry Cost": 124605.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 7.5, "Dry Cost": 137510.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 2.25, "Dry Cost": 46700.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 3.0, "Dry Cost": 56105.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 5.0, "Dry Cost": 95035.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 6.0, "Dry Cost": 108350.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Concealed", "Cooling": "Hot & Cold", "Horse Power": 7.5, "Dry Cost": 119610.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 1.5, "Dry Cost": 24895.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 2.25, "Dry Cost": 37190.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 3.0, "Dry Cost": 44625.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 3.0, "Dry Cost": 48050.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 4.0, "Dry Cost": 84250.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 4.0, "Dry Cost": 74960.0},
+    {"Model": "Carrier", "Type": "Inverter", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 5.0, "Dry Cost": 96810.0},
+    {"Model": "Carrier", "Type": "Normal", "Installation Type": "Split", "Cooling": "Hot & Cold", "Horse Power": 5.0, "Dry Cost": 86125.0},
+    {"Model": "Midea", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 1.5, "Dry Cost": 21900.0},
+    {"Model": "Midea", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 2.25, "Dry Cost": 32900.0},
+    {"Model": "Midea", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 3.0, "Dry Cost": 38800.0},
+    {"Model": "Midea", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 4.0, "Dry Cost": 64800.0},
+    {"Model": "Midea", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 5.0, "Dry Cost": 74500.0},
+    {"Model": "Fresh", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 1.5, "Dry Cost": 18500.0},
+    {"Model": "Fresh", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 2.25, "Dry Cost": 30000.0},
+    {"Model": "Fresh", "Type": "Normal", "Installation Type": "Split", "Cooling": "Cold Only", "Horse Power": 3.0, "Dry Cost": 36000.0},
+)
+
+
+def ac_configuration_key(configuration):
+    """Return the unique selectable equipment combination."""
+    return "|".join(
+        str(configuration[field])
+        for field in (
+            "Model",
+            "Type",
+            "Installation Type",
+            "Cooling",
+            "Horse Power",
+        )
+    )
+
+
+def ac_catalog_options(field, filters=None):
+    """Return valid dependent-selector values while preserving catalog order."""
+    filters = filters or {}
+    values = []
+    for catalog_item in AC_RATE_CATALOG:
+        if all(catalog_item.get(name) == value for name, value in filters.items()):
+            value = catalog_item[field]
+            if value not in values:
+                values.append(value)
+    return values
+
+
+def build_ac_line_items(configuration):
+    """Build transparent selling-price quotation lines for one A.C selection."""
+    equipment_selling_rate = round(
+        float(configuration["Dry Cost"]) / AC_DRY_COST_FACTOR,
+        2,
+    )
+    unit_qty = int(configuration["Unit QTY"])
+    freon_meters = float(configuration["Freon Meters per Unit"])
+    horsepower = float(configuration["Horse Power"])
+    horsepower_label = f"{horsepower:g}"
+    config_key = ac_configuration_key(configuration)
+    metadata = {
+        "Model": configuration["Model"],
+        "Type": configuration["Type"],
+        "Installation Type": configuration["Installation Type"],
+        "Cooling": configuration["Cooling"],
+        "Horse Power": horsepower,
+        "Configuration Key": config_key,
+        "Lookup Name": "A.C",
+    }
+
+    lines = [
+        {
+            **metadata,
+            "Component": "A.C Unit",
+            "Description": (
+                f"Supply and install {configuration['Model']} "
+                f"{configuration['Type']} {configuration['Installation Type']} "
+                f"air-conditioning unit, {configuration['Cooling']}, "
+                f"{horsepower_label} HP."
+            ),
+            "Unit": "NO.",
+            "QTY": float(unit_qty),
+            "Rate": equipment_selling_rate,
+            "Total Amount": float(unit_qty) * equipment_selling_rate,
+        },
+        {
+            **metadata,
+            "Component": "Freon Piping",
+            "Description": (
+                f"Supply and install refrigerant (Freon) piping for "
+                f"{configuration['Model']} {horsepower_label} HP "
+                "air-conditioning unit."
+            ),
+            "Unit": "M",
+            "QTY": float(unit_qty) * freon_meters,
+            "Rate": AC_FREON_PIPE_RATE,
+            "Total Amount": float(unit_qty) * freon_meters * AC_FREON_PIPE_RATE,
+        },
+    ]
+
+    if configuration["Installation Type"] == "Concealed":
+        grille_meters = float(configuration["Grille Meters per Unit"])
+        lines.extend(
+            [
+                {
+                    **metadata,
+                    "Component": "Ductwork & Insulation",
+                    "Description": (
+                        "Supply and install ductwork and insulation for "
+                        f"{configuration['Model']} {horsepower_label} HP "
+                        "concealed air-conditioning unit."
+                    ),
+                    "Unit": "NO.",
+                    "QTY": float(unit_qty),
+                    "Rate": AC_CONCEALED_DUCT_RATE,
+                    "Total Amount": float(unit_qty) * AC_CONCEALED_DUCT_RATE,
+                },
+                {
+                    **metadata,
+                    "Component": "A.C Grille",
+                    "Description": (
+                        "Supply and install air-conditioning grille for "
+                        f"{configuration['Model']} {horsepower_label} HP "
+                        "concealed unit."
+                    ),
+                    "Unit": "M",
+                    "QTY": float(unit_qty) * grille_meters,
+                    "Rate": AC_GRILLE_RATE,
+                    "Total Amount": float(unit_qty) * grille_meters * AC_GRILLE_RATE,
+                },
+            ]
+        )
+
+    return lines
+
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
@@ -281,6 +442,8 @@ if df_fact is not None and not df_fact.empty:
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
     if st.session_state.get('last_master_request') != selected_request_type:
         st.session_state.staged_items = []
+        if selected_request_type == "A.C":
+            st.session_state.ac_context = None
         st.session_state.last_master_request = selected_request_type
 
     if selected_request_type == "Roof Room":
@@ -1117,6 +1280,356 @@ if df_fact is not None and not df_fact.empty:
         col_t1, col_t2 = st.columns(2)
         col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
+    elif selected_request_type == "A.C":
+        st.markdown("### ❄️ A.C Quotation Builder")
+        st.caption(
+            "Select the equipment in order, then set the quantity and required "
+            "installation lengths. All displayed rates are selling rates."
+        )
+
+        ac_context = f"{selected_unit}|ac_configurator_v1"
+        if st.session_state.get("ac_context") != ac_context:
+            st.session_state.ac_context = ac_context
+            st.session_state.ac_configurations = []
+            st.session_state.ac_selection_revision = 0
+            st.session_state.staged_items = []
+
+        if "ac_configurations" not in st.session_state or not isinstance(
+            st.session_state.ac_configurations,
+            list,
+        ):
+            st.session_state.ac_configurations = []
+        if "ac_selection_revision" not in st.session_state:
+            st.session_state.ac_selection_revision = 0
+
+        st.markdown("##### 1. Select A.C Equipment")
+        selector_col1, selector_col2, selector_col3, selector_col4, selector_col5 = (
+            st.columns(5)
+        )
+
+        with selector_col1:
+            ac_model = st.selectbox(
+                "Model",
+                ac_catalog_options("Model"),
+                key=f"ac_model_{st.session_state.ac_selection_revision}",
+            )
+
+        with selector_col2:
+            ac_type_options = ac_catalog_options(
+                "Type",
+                {"Model": ac_model},
+            )
+            ac_type = st.selectbox(
+                "Type",
+                ac_type_options,
+                key=(
+                    f"ac_type_{ac_model}_"
+                    f"{st.session_state.ac_selection_revision}"
+                ),
+            )
+
+        with selector_col3:
+            installation_filters = {
+                "Model": ac_model,
+                "Type": ac_type,
+            }
+            ac_installation_options = ac_catalog_options(
+                "Installation Type",
+                installation_filters,
+            )
+            ac_installation = st.selectbox(
+                "Installation Type",
+                ac_installation_options,
+                key=(
+                    f"ac_installation_{ac_model}_{ac_type}_"
+                    f"{st.session_state.ac_selection_revision}"
+                ),
+            )
+
+        with selector_col4:
+            cooling_filters = {
+                **installation_filters,
+                "Installation Type": ac_installation,
+            }
+            ac_cooling_options = ac_catalog_options(
+                "Cooling",
+                cooling_filters,
+            )
+            ac_cooling = st.selectbox(
+                "Cooling",
+                ac_cooling_options,
+                key=(
+                    f"ac_cooling_{ac_model}_{ac_type}_{ac_installation}_"
+                    f"{st.session_state.ac_selection_revision}"
+                ),
+            )
+
+        with selector_col5:
+            horsepower_filters = {
+                **cooling_filters,
+                "Cooling": ac_cooling,
+            }
+            ac_horsepower_options = ac_catalog_options(
+                "Horse Power",
+                horsepower_filters,
+            )
+            ac_horsepower = st.selectbox(
+                "Horse Power",
+                ac_horsepower_options,
+                format_func=lambda value: f"{float(value):g} HP",
+                key=(
+                    f"ac_horsepower_{ac_model}_{ac_type}_"
+                    f"{ac_installation}_{ac_cooling}_"
+                    f"{st.session_state.ac_selection_revision}"
+                ),
+            )
+
+        selected_catalog_item = next(
+            item
+            for item in AC_RATE_CATALOG
+            if all(
+                item[field] == value
+                for field, value in {
+                    "Model": ac_model,
+                    "Type": ac_type,
+                    "Installation Type": ac_installation,
+                    "Cooling": ac_cooling,
+                    "Horse Power": ac_horsepower,
+                }.items()
+            )
+        )
+
+        st.markdown("##### 2. Set Quantity & Installation")
+        quantity_columns = st.columns(3)
+        selection_suffix = (
+            f"{ac_model}_{ac_type}_{ac_installation}_{ac_cooling}_"
+            f"{ac_horsepower}_{st.session_state.ac_selection_revision}"
+        )
+        with quantity_columns[0]:
+            ac_unit_qty = st.number_input(
+                "A.C Unit QTY",
+                min_value=1,
+                max_value=100,
+                value=1,
+                step=1,
+                key=f"ac_unit_qty_{selection_suffix}",
+            )
+        with quantity_columns[1]:
+            freon_meters_per_unit = st.number_input(
+                "Freon Piping per Unit (m)",
+                min_value=AC_FREON_METERS_MIN,
+                max_value=AC_FREON_METERS_MAX,
+                value=AC_FREON_METERS_MIN,
+                step=0.5,
+                help="Allowed range: 10–15 meters for every A.C unit.",
+                key=f"ac_freon_meters_{selection_suffix}",
+            )
+
+        grille_meters_per_unit = None
+        with quantity_columns[2]:
+            if ac_installation == "Concealed":
+                grille_meters_per_unit = st.number_input(
+                    "A.C Grille per Unit (m)",
+                    min_value=AC_GRILLE_METERS_MIN,
+                    max_value=AC_GRILLE_METERS_MAX,
+                    value=AC_GRILLE_METERS_MIN,
+                    step=0.5,
+                    help="Allowed range: 4–6 meters for every concealed unit.",
+                    key=f"ac_grille_meters_{selection_suffix}",
+                )
+            else:
+                st.text_input(
+                    "Concealed Extras",
+                    value="Not required for Split",
+                    disabled=True,
+                    key=f"ac_concealed_not_required_{selection_suffix}",
+                )
+
+        preview_configuration = {
+            **selected_catalog_item,
+            "Unit QTY": int(ac_unit_qty),
+            "Freon Meters per Unit": float(freon_meters_per_unit),
+            "Grille Meters per Unit": (
+                float(grille_meters_per_unit)
+                if grille_meters_per_unit is not None
+                else 0.0
+            ),
+        }
+        preview_lines = build_ac_line_items(preview_configuration)
+        equipment_preview_total = preview_lines[0]["Total Amount"]
+        piping_preview_total = preview_lines[1]["Total Amount"]
+        concealed_preview_total = sum(
+            line["Total Amount"]
+            for line in preview_lines
+            if line["Component"] in ("Ductwork & Insulation", "A.C Grille")
+        )
+        configuration_preview_total = sum(
+            line["Total Amount"]
+            for line in preview_lines
+        )
+
+        preview_columns = st.columns(4)
+        preview_columns[0].metric(
+            "A.C Units",
+            f"{equipment_preview_total:,.2f} EGP",
+        )
+        preview_columns[1].metric(
+            "Freon Piping",
+            f"{piping_preview_total:,.2f} EGP",
+        )
+        preview_columns[2].metric(
+            "Concealed Extras",
+            (
+                f"{concealed_preview_total:,.2f} EGP"
+                if ac_installation == "Concealed"
+                else "Not required"
+            ),
+        )
+        preview_columns[3].metric(
+            "Configuration Total",
+            f"{configuration_preview_total:,.2f} EGP",
+        )
+
+        selected_configuration_key = ac_configuration_key(
+            preview_configuration
+        )
+        existing_configuration_keys = {
+            ac_configuration_key(configuration)
+            for configuration in st.session_state.ac_configurations
+        }
+        duplicate_configuration = (
+            selected_configuration_key in existing_configuration_keys
+        )
+
+        if duplicate_configuration:
+            st.warning(
+                "This exact A.C configuration is already in the quotation. "
+                "Remove it first if you need to replace its quantity or lengths."
+            )
+
+        if st.button(
+            "➕ Add A.C Configuration",
+            type="primary",
+            use_container_width=True,
+            disabled=duplicate_configuration,
+        ):
+            st.session_state.ac_configurations.append(
+                preview_configuration.copy()
+            )
+            st.session_state.ac_selection_revision += 1
+            st.rerun()
+
+        st.markdown("##### 3. Selected A.C Configurations")
+        if not st.session_state.ac_configurations:
+            st.info("No A.C configuration has been added yet.")
+            st.session_state.staged_items = []
+        else:
+            for configuration_index, configuration in enumerate(
+                st.session_state.ac_configurations
+            ):
+                summary_columns = st.columns([4, 2, 2, 1])
+                summary_columns[0].markdown(
+                    f"**{configuration['Model']} · {configuration['Type']} · "
+                    f"{configuration['Installation Type']} · "
+                    f"{configuration['Cooling']} · "
+                    f"{float(configuration['Horse Power']):g} HP**"
+                )
+                summary_columns[1].write(
+                    f"Units: {int(configuration['Unit QTY'])}"
+                )
+                length_summary = (
+                    f"Freon: {float(configuration['Freon Meters per Unit']):g} m/unit"
+                )
+                if configuration["Installation Type"] == "Concealed":
+                    length_summary += (
+                        f" · Grille: "
+                        f"{float(configuration['Grille Meters per Unit']):g} m/unit"
+                    )
+                summary_columns[2].write(length_summary)
+                if summary_columns[3].button(
+                    "Remove",
+                    key=(
+                        f"remove_ac_configuration_"
+                        f"{st.session_state.ac_selection_revision}_"
+                        f"{configuration_index}"
+                    ),
+                ):
+                    st.session_state.ac_configurations.pop(configuration_index)
+                    st.session_state.ac_selection_revision += 1
+                    st.rerun()
+
+            ac_staged_items = []
+            for configuration in st.session_state.ac_configurations:
+                ac_staged_items.extend(build_ac_line_items(configuration))
+
+            for item_number, item in enumerate(ac_staged_items, start=1):
+                item["No."] = item_number
+            st.session_state.staged_items = ac_staged_items
+
+            result_columns = [
+                "No.",
+                "Component",
+                "Model",
+                "Type",
+                "Installation Type",
+                "Cooling",
+                "Horse Power",
+                "Description",
+                "Unit",
+                "QTY",
+                "Rate",
+                "Total Amount",
+            ]
+            st.dataframe(
+                pd.DataFrame(st.session_state.staged_items)[result_columns],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Horse Power": st.column_config.NumberColumn(
+                        "Horse Power",
+                        format="%.2f HP",
+                    ),
+                    "QTY": st.column_config.NumberColumn(
+                        "QTY",
+                        format="%.2f",
+                    ),
+                    "Rate": st.column_config.NumberColumn(
+                        "Selling Rate (EGP)",
+                        format="%.2f",
+                    ),
+                    "Total Amount": st.column_config.NumberColumn(
+                        "Total Amount (EGP)",
+                        format="%.2f",
+                    ),
+                },
+            )
+
+            ac_subtotal = sum(
+                float(item["Total Amount"])
+                for item in st.session_state.staged_items
+            )
+            ac_vat = ac_subtotal * 0.14
+            ac_total_with_vat = ac_subtotal + ac_vat
+            total_columns = st.columns(2)
+            total_columns[0].metric(
+                "Total (EGP)",
+                f"{ac_subtotal:,.2f} EGP",
+            )
+            total_columns[1].metric(
+                "Total with 14% VAT (EGP)",
+                f"{ac_total_with_vat:,.2f} EGP",
+            )
+
+            if st.button(
+                "❌ Clear A.C Quotation",
+                type="secondary",
+                use_container_width=True,
+            ):
+                st.session_state.ac_configurations = []
+                st.session_state.staged_items = []
+                st.session_state.ac_selection_revision += 1
+                st.rerun()
 
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
