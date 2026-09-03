@@ -181,6 +181,45 @@ class ACConfigurationTests(unittest.TestCase):
         self.assertEqual(lines[1]["QTY"], 24.0)
         self.assertEqual(lines[1]["Rate"], 1176.4)
 
+    def test_freon_can_be_excluded_from_cost_and_scope(self):
+        configuration = {
+            **self.find_item(
+                Model="Midea",
+                Type="Normal",
+                **{
+                    "Installation Type": "Split",
+                    "Cooling": "Cold Only",
+                    "Horse Power": 1.5,
+                },
+            ),
+            "Room": "Bedroom",
+            "Unit QTY": 2,
+            "Freon Meters per Unit": 15.0,
+            "Grille Meters per Unit": 0.0,
+        }
+        lines = self.namespace["build_ac_line_items"](
+            configuration,
+            include_freon=False,
+        )
+        self.assertEqual(
+            [line["Component"] for line in lines],
+            ["A.C Unit"],
+        )
+
+        scope_rows = self.namespace["build_ac_detailed_scope_rows"](
+            [configuration],
+            include_freon=False,
+        )
+        self.assertNotIn(
+            "Refrigerant Pipes",
+            [row["Item"] for row in scope_rows],
+        )
+        ac_section = next(
+            row for row in scope_rows if row["Item"] == "A.C Units"
+        )
+        self.assertEqual(ac_section["No."], "1")
+        self.assertEqual(scope_rows[-1]["Total (EGP)"], lines[0]["Total Amount"])
+
     def test_concealed_configuration_adds_duct_and_grille_once_per_unit(self):
         configuration = {
             **self.find_item(
@@ -356,6 +395,26 @@ class ACConfigurationTests(unittest.TestCase):
         self.assertIn("value=False", checkbox_block)
         self.assertIn(
             "A separate priced breakdown (Google Doc and PDF) will always be",
+            self.ac_section,
+        )
+
+    def test_freon_checkbox_is_first_and_defaults_to_included(self):
+        freon_checkbox_start = self.ac_section.index(
+            '"Include Freon Piping"'
+        )
+        attachment_checkbox_start = self.ac_section.index(
+            '"Include prices in the detailed scope attached to the quotation"'
+        )
+        room_inputs_start = self.ac_section.index('"##### 1. Room & Equipment"')
+        self.assertLess(freon_checkbox_start, attachment_checkbox_start)
+        self.assertLess(freon_checkbox_start, room_inputs_start)
+        freon_checkbox_block = self.ac_section[
+            freon_checkbox_start:freon_checkbox_start + 450
+        ]
+        self.assertIn("value=True", freon_checkbox_block)
+        self.assertIn("if include_ac_freon:", self.ac_section)
+        self.assertIn(
+            "include_freon=include_ac_freon",
             self.ac_section,
         )
 
