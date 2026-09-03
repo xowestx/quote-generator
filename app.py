@@ -116,14 +116,13 @@ def ac_catalog_options(field, filters=None):
     return values
 
 
-def build_ac_line_items(configuration):
+def build_ac_line_items(configuration, include_freon=True):
     """Build transparent selling-price quotation lines for one A.C selection."""
     equipment_selling_rate = round(
         float(configuration["Dry Cost"]) / AC_DRY_COST_FACTOR,
         2,
     )
     unit_qty = int(configuration["Unit QTY"])
-    freon_meters = float(configuration["Freon Meters per Unit"])
     horsepower = float(configuration["Horse Power"])
     horsepower_label = f"{horsepower:g}"
     config_key = ac_configuration_key(configuration)
@@ -153,20 +152,27 @@ def build_ac_line_items(configuration):
             "Rate": equipment_selling_rate,
             "Total Amount": float(unit_qty) * equipment_selling_rate,
         },
-        {
-            **metadata,
-            "Component": "Freon Piping",
-            "Description": (
-                f"Supply and install refrigerant (Freon) piping for "
-                f"{configuration['Model']} {horsepower_label} HP "
-                f"air-conditioning unit serving {configuration['Room']}."
-            ),
-            "Unit": "M",
-            "QTY": float(unit_qty) * freon_meters,
-            "Rate": AC_FREON_PIPE_RATE,
-            "Total Amount": float(unit_qty) * freon_meters * AC_FREON_PIPE_RATE,
-        },
     ]
+
+    if include_freon:
+        freon_meters = float(configuration["Freon Meters per Unit"])
+        lines.append(
+            {
+                **metadata,
+                "Component": "Freon Piping",
+                "Description": (
+                    f"Supply and install refrigerant (Freon) piping for "
+                    f"{configuration['Model']} {horsepower_label} HP "
+                    f"air-conditioning unit serving {configuration['Room']}."
+                ),
+                "Unit": "M",
+                "QTY": float(unit_qty) * freon_meters,
+                "Rate": AC_FREON_PIPE_RATE,
+                "Total Amount": (
+                    float(unit_qty) * freon_meters * AC_FREON_PIPE_RATE
+                ),
+            }
+        )
 
     if configuration["Installation Type"] == "Concealed":
         grille_meters = float(configuration["Grille Meters per Unit"])
@@ -205,15 +211,19 @@ def build_ac_line_items(configuration):
     return lines
 
 
-def build_ac_detailed_scope_rows(configurations):
+def build_ac_detailed_scope_rows(configurations, include_freon=True):
     """Build the HVAC scope once; Apps Script controls whether prices are shown."""
     if not configurations:
         return []
 
-    total_freon_meters = sum(
-        int(configuration["Unit QTY"])
-        * float(configuration["Freon Meters per Unit"])
-        for configuration in configurations
+    total_freon_meters = (
+        sum(
+            int(configuration["Unit QTY"])
+            * float(configuration["Freon Meters per Unit"])
+            for configuration in configurations
+        )
+        if include_freon
+        else 0.0
     )
     concealed_configurations = [
         configuration
@@ -240,37 +250,49 @@ def build_ac_detailed_scope_rows(configurations):
             "Total (EGP)": "",
             "Row Type": "section",
         },
+    ]
+
+    section_number = 1
+    if include_freon:
+        rows.extend(
+            [
+                {
+                    "No.": str(section_number),
+                    "Item": "Refrigerant Pipes",
+                    "Unit": "",
+                    "QTY": "",
+                    "Rate": "",
+                    "Total (EGP)": "",
+                    "Row Type": "section",
+                },
+                {
+                    "No.": f"{section_number}.1",
+                    "Item": (
+                        "Supply and install refrigerant pipes for the selected "
+                        "A.C units."
+                    ),
+                    "Unit": "m",
+                    "QTY": total_freon_meters,
+                    "Rate": AC_FREON_PIPE_RATE,
+                    "Total (EGP)": total_freon_meters * AC_FREON_PIPE_RATE,
+                    "Row Type": "item",
+                },
+            ]
+        )
+        section_number += 1
+
+    ac_units_section_number = section_number
+    rows.append(
         {
-            "No.": "1",
-            "Item": "Refrigerant Pipes",
-            "Unit": "",
-            "QTY": "",
-            "Rate": "",
-            "Total (EGP)": "",
-            "Row Type": "section",
-        },
-        {
-            "No.": "1.1",
-            "Item": (
-                "Supply and install refrigerant pipes for the selected "
-                "A.C units."
-            ),
-            "Unit": "m",
-            "QTY": total_freon_meters,
-            "Rate": AC_FREON_PIPE_RATE,
-            "Total (EGP)": total_freon_meters * AC_FREON_PIPE_RATE,
-            "Row Type": "item",
-        },
-        {
-            "No.": "2",
+            "No.": str(ac_units_section_number),
             "Item": "A.C Units",
             "Unit": "",
             "QTY": "",
             "Rate": "",
             "Total (EGP)": "",
             "Row Type": "section",
-        },
-    ]
+        }
+    )
 
     for item_number, configuration in enumerate(configurations, start=1):
         horsepower_label = f"{float(configuration['Horse Power']):g}"
@@ -281,7 +303,7 @@ def build_ac_detailed_scope_rows(configurations):
         equipment_quantity = int(configuration["Unit QTY"])
         rows.append(
             {
-                "No.": f"2.{item_number}",
+                "No.": f"{ac_units_section_number}.{item_number}",
                 "Item": (
                     f"Supply and install {horsepower_label} HP "
                     f"{configuration['Model']} "
@@ -299,10 +321,11 @@ def build_ac_detailed_scope_rows(configurations):
         )
 
     if concealed_configurations:
+        ductwork_section_number = ac_units_section_number + 1
         rows.extend(
             [
                 {
-                    "No.": "3",
+                    "No.": str(ductwork_section_number),
                     "Item": "Ductwork & Accessories",
                     "Unit": "",
                     "QTY": "",
@@ -311,7 +334,7 @@ def build_ac_detailed_scope_rows(configurations):
                     "Row Type": "section",
                 },
                 {
-                    "No.": "3.1",
+                    "No.": f"{ductwork_section_number}.1",
                     "Item": (
                         "Supply and install A.C grilles as per attached design."
                     ),
@@ -322,7 +345,7 @@ def build_ac_detailed_scope_rows(configurations):
                     "Row Type": "item",
                 },
                 {
-                    "No.": "3.2",
+                    "No.": f"{ductwork_section_number}.2",
                     "Item": (
                         "Supply and install ductwork with required insulation "
                         "as per attached design."
@@ -1449,6 +1472,15 @@ if df_fact is not None and not df_fact.empty:
             "installation lengths. All displayed rates are selling rates."
         )
 
+        include_ac_freon = st.checkbox(
+            "Include Freon Piping",
+            value=True,
+            help=(
+                "Uncheck to remove Freon piping from the inputs, quotation "
+                "total, attached scope, and mandatory priced breakdown."
+            ),
+            key=f"include_ac_freon_{selected_unit}",
+        )
         attach_priced_ac_scope = st.checkbox(
             "Include prices in the detailed scope attached to the quotation",
             value=False,
@@ -1583,7 +1615,12 @@ if df_fact is not None and not df_fact.empty:
         )
 
         st.markdown("##### 2. Set Quantity & Installation")
-        quantity_columns = st.columns(3)
+        installation_field_count = (
+            1
+            + int(include_ac_freon)
+            + int(ac_installation == "Concealed")
+        )
+        quantity_columns = st.columns(installation_field_count)
         selection_suffix = (
             f"{ac_model}_{ac_type}_{ac_installation}_{ac_cooling}_"
             f"{ac_horsepower}_{st.session_state.ac_selection_revision}"
@@ -1597,20 +1634,24 @@ if df_fact is not None and not df_fact.empty:
                 step=1,
                 key=f"ac_unit_qty_{selection_suffix}",
             )
-        with quantity_columns[1]:
-            freon_meters_per_unit = st.number_input(
-                "Freon Piping per Unit (m)",
-                min_value=AC_FREON_METERS_MIN,
-                max_value=AC_FREON_METERS_MAX,
-                value=AC_FREON_METERS_MIN,
-                step=0.5,
-                help="Allowed range: 10–15 meters for every A.C unit.",
-                key=f"ac_freon_meters_{selection_suffix}",
-            )
+        freon_meters_per_unit = AC_FREON_METERS_MIN
+        next_installation_column = 1
+        if include_ac_freon:
+            with quantity_columns[next_installation_column]:
+                freon_meters_per_unit = st.number_input(
+                    "Freon Piping per Unit (m)",
+                    min_value=AC_FREON_METERS_MIN,
+                    max_value=AC_FREON_METERS_MAX,
+                    value=AC_FREON_METERS_MIN,
+                    step=0.5,
+                    help="Allowed range: 10–15 meters for every A.C unit.",
+                    key=f"ac_freon_meters_{selection_suffix}",
+                )
+            next_installation_column += 1
 
         grille_meters_per_unit = None
-        with quantity_columns[2]:
-            if ac_installation == "Concealed":
+        if ac_installation == "Concealed":
+            with quantity_columns[next_installation_column]:
                 grille_meters_per_unit = st.number_input(
                     "A.C Grille per Unit (m)",
                     min_value=AC_GRILLE_METERS_MIN,
@@ -1619,13 +1660,6 @@ if df_fact is not None and not df_fact.empty:
                     step=0.5,
                     help="Allowed range: 4–6 meters for every concealed unit.",
                     key=f"ac_grille_meters_{selection_suffix}",
-                )
-            else:
-                st.text_input(
-                    "Concealed Extras",
-                    value="Not required for Split",
-                    disabled=True,
-                    key=f"ac_concealed_not_required_{selection_suffix}",
                 )
 
         preview_configuration = {
@@ -1639,9 +1673,20 @@ if df_fact is not None and not df_fact.empty:
                 else 0.0
             ),
         }
-        preview_lines = build_ac_line_items(preview_configuration)
-        equipment_preview_total = preview_lines[0]["Total Amount"]
-        piping_preview_total = preview_lines[1]["Total Amount"]
+        preview_lines = build_ac_line_items(
+            preview_configuration,
+            include_freon=include_ac_freon,
+        )
+        equipment_preview_total = sum(
+            line["Total Amount"]
+            for line in preview_lines
+            if line["Component"] == "A.C Unit"
+        )
+        piping_preview_total = sum(
+            line["Total Amount"]
+            for line in preview_lines
+            if line["Component"] == "Freon Piping"
+        )
         concealed_preview_total = sum(
             line["Total Amount"]
             for line in preview_lines
@@ -1659,7 +1704,11 @@ if df_fact is not None and not df_fact.empty:
         )
         preview_columns[1].metric(
             "Freon Piping",
-            f"{piping_preview_total:,.2f} EGP",
+            (
+                f"{piping_preview_total:,.2f} EGP"
+                if include_ac_freon
+                else "Not included"
+            ),
         )
         preview_columns[2].metric(
             "Concealed Extras",
@@ -1728,15 +1777,18 @@ if df_fact is not None and not df_fact.empty:
                 summary_columns[2].write(
                     f"Units: {int(configuration['Unit QTY'])}"
                 )
-                length_summary = (
-                    f"Freon: {float(configuration['Freon Meters per Unit']):g} m/unit"
-                )
+                length_parts = []
+                if include_ac_freon:
+                    length_parts.append(
+                        "Freon: "
+                        f"{float(configuration['Freon Meters per Unit']):g} m/unit"
+                    )
                 if configuration["Installation Type"] == "Concealed":
-                    length_summary += (
-                        f" · Grille: "
+                    length_parts.append(
+                        "Grille: "
                         f"{float(configuration['Grille Meters per Unit']):g} m/unit"
                     )
-                summary_columns[3].write(length_summary)
+                summary_columns[3].write(" · ".join(length_parts))
                 if summary_columns[4].button(
                     "Remove",
                     key=(
@@ -1751,7 +1803,12 @@ if df_fact is not None and not df_fact.empty:
 
             ac_internal_items = []
             for configuration in st.session_state.ac_configurations:
-                ac_internal_items.extend(build_ac_line_items(configuration))
+                ac_internal_items.extend(
+                    build_ac_line_items(
+                        configuration,
+                        include_freon=include_ac_freon,
+                    )
+                )
 
             for item_number, item in enumerate(ac_internal_items, start=1):
                 item["No."] = item_number
@@ -1801,7 +1858,8 @@ if df_fact is not None and not df_fact.empty:
             )
             st.session_state.ac_detailed_scope_items = (
                 build_ac_detailed_scope_rows(
-                    st.session_state.ac_configurations
+                    st.session_state.ac_configurations,
+                    include_freon=include_ac_freon,
                 )
             )
             st.session_state.staged_items = [
