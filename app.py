@@ -2585,19 +2585,56 @@ if df_fact is not None and not df_fact.empty:
                             st.error(f"Connection failed: {e}")
 
             with col_export2:
+                def pdf_safe_text(value):
+                    """Convert UI text safely for FPDF's built-in Latin-1 font."""
+                    text = str(value)
+                    replacements = {
+                        "–": "-",
+                        "—": "-",
+                        "‑": "-",
+                        "’": "'",
+                        "‘": "'",
+                        "“": '"',
+                        "”": '"',
+                        "…": "...",
+                        "•": "-",
+                        "\u00a0": " ",
+                    }
+                    for source_character, replacement in replacements.items():
+                        text = text.replace(source_character, replacement)
+                    return text.encode(
+                        "latin-1",
+                        errors="replace",
+                    ).decode("latin-1")
+
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Helvetica", "B", 16)
                 pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
                 pdf.set_font("Helvetica", "", 12)
                 pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-                pdf.cell(0, 10, f"Client Reference Name: {final_client_name}", ln=True)
-                pdf.cell(0, 10, f"Unit ID Assignment: {selected_unit}", ln=True)
+                pdf.cell(
+                    0,
+                    10,
+                    pdf_safe_text(f"Client Reference Name: {final_client_name}"),
+                    ln=True,
+                )
+                pdf.cell(
+                    0,
+                    10,
+                    pdf_safe_text(f"Unit ID Assignment: {selected_unit}"),
+                    ln=True,
+                )
                 
                 disp_req_name = selected_request_type
                 if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
-                pdf.cell(0, 10, f"Request Type: {disp_req_name}", ln=True)
+                pdf.cell(
+                    0,
+                    10,
+                    pdf_safe_text(f"Request Type: {disp_req_name}"),
+                    ln=True,
+                )
                 pdf.ln(8)
                 
                 pdf.set_font("Helvetica", "B", 10)
@@ -2610,10 +2647,33 @@ if df_fact is not None and not df_fact.empty:
                 
                 pdf.set_font("Helvetica", "", 9)
                 for _, item_row in summary_df.iterrows():
-                    pdf.cell(10, 8, str(item_row.get('No.', '')), border=1, align="C")
-                    pdf.cell(90, 8, str(item_row.get('Description', ''))[:45], border=1)
-                    pdf.cell(15, 8, str(item_row.get('Unit', '')), border=1, align="C")
-                    pdf.cell(15, 8, str(item_row.get('QTY', '')), border=1, align="C")
+                    pdf.cell(
+                        10,
+                        8,
+                        pdf_safe_text(item_row.get('No.', '')),
+                        border=1,
+                        align="C",
+                    )
+                    pdf.cell(
+                        90,
+                        8,
+                        pdf_safe_text(item_row.get('Description', ''))[:45],
+                        border=1,
+                    )
+                    pdf.cell(
+                        15,
+                        8,
+                        pdf_safe_text(item_row.get('Unit', '')),
+                        border=1,
+                        align="C",
+                    )
+                    pdf.cell(
+                        15,
+                        8,
+                        pdf_safe_text(item_row.get('QTY', '')),
+                        border=1,
+                        align="C",
+                    )
                     pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
                     pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
                     
@@ -2638,9 +2698,6 @@ if df_fact is not None and not df_fact.empty:
                     pdf.set_font("Helvetica", "B", 11)
                     pdf.cell(0, 8, "Terms & Conditions:", ln=True)
                     pdf.set_font("Helvetica", "", 8)
-
-                    def pdf_safe_text(value):
-                        return str(value).encode("latin-1", errors="replace").decode("latin-1")
 
                     for term_line in final_terms_text.splitlines():
                         if term_line.strip():
