@@ -672,7 +672,8 @@ function appendAcDetailedScope(
   unitId,
   includePrices,
   startOnNewPage,
-  headingText
+  headingText,
+  scopeLabel
 ) {
   if (!Array.isArray(scopeItems) || scopeItems.length === 0) return;
 
@@ -685,7 +686,7 @@ function appendAcDetailedScope(
   body.appendParagraph("Project: " + (unitId || ""))
       .setFontFamily(CONFIG.FONT_FAMILY)
       .setFontSize(10);
-  body.appendParagraph("Scope: HVAC Works")
+  body.appendParagraph("Scope: " + (scopeLabel || "HVAC Works"))
       .setFontFamily(CONFIG.FONT_FAMILY)
       .setFontSize(10);
   body.appendParagraph("");
@@ -749,17 +750,22 @@ function appendAcDetailedScope(
   table.setColumnWidth(5, 72.0);
 }
 
-function createAcPricedBreakdown(
+function createPricedBreakdown(
   scopeItems,
   unitId,
   clientName,
   quotationName,
   formattedDate,
   destFolder,
-  pdfFolder
+  pdfFolder,
+  breakdownCategory,
+  scopeLabel
 ) {
   if (!Array.isArray(scopeItems) || scopeItems.length === 0) {
-    throw new Error("A.C priced breakdown cannot be generated without scope items.");
+    throw new Error(
+      (breakdownCategory || "Priced") +
+      " breakdown cannot be generated without scope items."
+    );
   }
 
   const breakdownName = quotationName + " - Priced Breakdown";
@@ -776,7 +782,8 @@ function createAcPricedBreakdown(
     unitId,
     true,
     false,
-    "A.C Priced Breakdown"
+    (breakdownCategory || "Detailed Scope") + " Priced Breakdown",
+    scopeLabel || breakdownCategory || "Detailed Scope"
   );
   breakdownBody.insertParagraph(2, "Client: " + (clientName || ""))
       .setFontFamily(CONFIG.FONT_FAMILY)
@@ -828,6 +835,8 @@ function doPost(e) {
       || /^\d+\s+BEDROOM/.test(reqTypeStr);
     const isAc = String(payload.requestCategory || "").toUpperCase() === "A.C"
       || reqTypeStr === "A.C";
+    const isGlassHouse = String(payload.requestCategory || "").toUpperCase() === "GLASS HOUSE"
+      || reqTypeStr.startsWith("GLASS HOUSE");
 
     const destFolderId = isFurniture ? CONFIG.FURNITURE_DOC_FOLDER_ID : CONFIG.DESTINATION_FOLDER_ID;
     const pdfFolderId = isFurniture ? CONFIG.FURNITURE_PDF_FOLDER_ID : CONFIG.PDF_DESTINATION_FOLDER_ID;
@@ -1051,9 +1060,12 @@ function doPost(e) {
       table.setColumnWidth(5, 81.36);   // Total (1.13")
     }
 
-    if (isAc) {
+    if (isAc || isGlassHouse) {
       if (!Array.isArray(payload.detailedScopeItems) || payload.detailedScopeItems.length === 0) {
-        throw new Error("A.C quotation requires detailed scope items for the mandatory breakdown.");
+        throw new Error(
+          (isGlassHouse ? "Glass House" : "A.C") +
+          " quotation requires detailed scope items for the mandatory breakdown."
+        );
       }
       const includeAttachedScopePrices = payload.priceAttachedDetailedScope === true;
       appendAcDetailedScope(
@@ -1062,21 +1074,24 @@ function doPost(e) {
         payload.unitId || "",
         includeAttachedScopePrices,
         true,
-        "Detailed Scope of Work"
+        "Detailed Scope of Work",
+        isGlassHouse ? "Glass House Works" : "HVAC Works"
       );
     }
 
     doc.saveAndClose();
     const docUrl = doc.getUrl();
-    const acPricedBreakdown = isAc
-      ? createAcPricedBreakdown(
+    const pricedBreakdown = (isAc || isGlassHouse)
+      ? createPricedBreakdown(
           payload.detailedScopeItems,
           payload.unitId || "",
           payload.clientName || "",
           docName,
           formattedDate,
           destFolder,
-          pdfFolder
+          pdfFolder,
+          isGlassHouse ? "Glass House" : "A.C",
+          isGlassHouse ? "Glass House Works" : "HVAC Works"
         )
       : null;
 
@@ -1141,8 +1156,8 @@ function doPost(e) {
         missingRoomPdfs: missingRoomPdfs,
         serialNumber: serialNumber,
         grandTotal: grandTotal,
-        pricedBreakdownDocUrl: acPricedBreakdown ? acPricedBreakdown.docUrl : null,
-        pricedBreakdownPdfUrl: acPricedBreakdown ? acPricedBreakdown.pdfUrl : null
+        pricedBreakdownDocUrl: pricedBreakdown ? pricedBreakdown.docUrl : null,
+        pricedBreakdownPdfUrl: pricedBreakdown ? pricedBreakdown.pdfUrl : null
       })).setMimeType(ContentService.MimeType.JSON);
 
     } else {
@@ -1176,8 +1191,8 @@ function doPost(e) {
         status: "success", 
         docUrl: docUrl,
         pdfUrl: pdfUrl,
-        pricedBreakdownDocUrl: acPricedBreakdown ? acPricedBreakdown.docUrl : null,
-        pricedBreakdownPdfUrl: acPricedBreakdown ? acPricedBreakdown.pdfUrl : null
+        pricedBreakdownDocUrl: pricedBreakdown ? pricedBreakdown.docUrl : null,
+        pricedBreakdownPdfUrl: pricedBreakdown ? pricedBreakdown.pdfUrl : null
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
