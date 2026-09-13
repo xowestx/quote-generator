@@ -442,20 +442,23 @@ class ACConfigurationTests(unittest.TestCase):
             'includePrices ? formatAcScopeAmount(item["Total (EGP)"]) : ""',
             helper,
         )
-        self.assertIn("function createAcPricedBreakdown(", self.script_source)
+        self.assertIn("function createPricedBreakdown(", self.script_source)
         self.assertIn(
             'quotationName + " - Priced Breakdown"',
             self.script_source,
         )
         self.assertIn(
-            "A.C quotation requires detailed scope items for the mandatory breakdown.",
+            '" quotation requires detailed scope items for the mandatory breakdown."',
             self.script_source,
         )
         self.assertIn(
             "const includeAttachedScopePrices = payload.priceAttachedDetailedScope === true;",
             self.script_source,
         )
-        self.assertIn("const acPricedBreakdown = isAc", self.script_source)
+        self.assertIn(
+            "const pricedBreakdown = (isAc || isGlassHouse)",
+            self.script_source,
+        )
         self.assertIn("pricedBreakdownDocUrl", self.script_source)
         self.assertIn("pricedBreakdownPdfUrl", self.script_source)
 
