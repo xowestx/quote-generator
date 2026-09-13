@@ -37,6 +37,19 @@ FURNITURE_RATES = {
 
 LAND_EXTENSION_RATES = (55000.0, 65000.0)
 
+GLASS_HOUSE_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1JJG3RpR4Q-Vd2iRNOB62SOK_x4WGNel1mUZmwf9Ht0A/edit"
+)
+GLASS_HOUSE_TAB_MAP = {
+    ("G", 1): "G op1",
+    ("G", 2): "G op2",
+    ("J-ABCD", 1): "J-A,B,C,D OP1",
+    ("J-ABCD", 2): "J-A,B,C,D OP2",
+    ("J-E", 1): "J-E OP1",
+    ("J-E", 2): "J-E OP2",
+}
+
 # A.C equipment source rates are dry cost. Quotations always use the selling
 # rate (dry cost / 0.85). The accessories below are already selling rates.
 AC_DRY_COST_FACTOR = 0.85
@@ -376,6 +389,245 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
     )
     return rows
 
+
+def resolve_glass_house_context(unit_id, unit_type, design_type, design_option):
+    """Resolve an eligible FACT townhouse to its Glass House pricing group."""
+    normalized_unit_type = " ".join(str(unit_type or "").upper().split())
+    normalized_design_type = " ".join(str(design_type or "").upper().split())
+
+    if not normalized_unit_type.startswith("TOWNHOUSE"):
+        raise ValueError("Glass House is available only for townhouse units.")
+
+    if normalized_design_type in {"G", "TOWNHOUSE G"}:
+        design_family = "G"
+    elif normalized_design_type in {"J", "TOWNHOUSE J"}:
+        design_family = "J"
+    else:
+        raise ValueError(
+            "Glass House is available only for townhouse Design Type G or J."
+        )
+
+    option_match = re.search(
+        r"\b([GJ])([A-E])(?:\d|\b|-)",
+        str(design_option or "").upper(),
+    )
+    option_variant = (
+        option_match.group(2)
+        if option_match and option_match.group(1) == design_family
+        else ""
+    )
+    unit_match = re.search(r"([A-E])\s*$", str(unit_id or "").upper())
+    unit_variant = unit_match.group(1) if unit_match else ""
+
+    if option_variant and unit_variant and option_variant != unit_variant:
+        raise ValueError(
+            "FACT conflict: the Design Option and Unit ID identify different "
+            "Glass House variants. Manual review is required."
+        )
+
+    variant = option_variant or unit_variant
+    allowed_variants = {"A", "B", "C", "D"} if design_family == "G" else {
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+    }
+    if variant not in allowed_variants:
+        raise ValueError(
+            "The Glass House variant could not be identified from FACT. "
+            "Manual review is required."
+        )
+
+    expected_corner_variants = (
+        {"A", "D"} if design_family == "G" else {"A", "E"}
+    )
+    variant_is_corner = variant in expected_corner_variants
+    if "CORNER" in normalized_unit_type and not variant_is_corner:
+        raise ValueError(
+            "FACT conflict: the unit is marked Corner but its design variant is "
+            f"{variant}. Manual review is required."
+        )
+    if "MIDDLE" in normalized_unit_type and variant_is_corner:
+        raise ValueError(
+            "FACT conflict: the unit is marked Middle but its design variant is "
+            f"{variant}. Manual review is required."
+        )
+
+    price_group = (
+        "G"
+        if design_family == "G"
+        else "J-E"
+        if variant == "E"
+        else "J-ABCD"
+    )
+    return {
+        "Design Family": design_family,
+        "Variant": variant,
+        "Price Group": price_group,
+    }
+
+
+def glass_house_tab_name(price_group, option_number):
+    """Return the exact live pricing tab for a resolved group and option."""
+    key = (str(price_group), int(option_number))
+    if key not in GLASS_HOUSE_TAB_MAP:
+        raise ValueError("Unsupported Glass House price group or option.")
+    return GLASS_HOUSE_TAB_MAP[key]
+
+
+def parse_google_visualization_response(response_text):
+    """Extract raw cell values from a Google Visualization API response."""
+    response_match = re.search(
+        r"google\.visualization\.Query\.setResponse\((.*)\);\s*$",
+        str(response_text),
+        flags=re.DOTALL,
+    )
+    if not response_match:
+        raise ValueError("The Glass House pricing response was not valid Google Sheet data.")
+
+    response_data = json.loads(response_match.group(1))
+    if response_data.get("status") == "error":
+        errors = response_data.get("errors") or []
+        message = errors[0].get("detailed_message", "Unknown Google Sheet error") if errors else "Unknown Google Sheet error"
+        raise ValueError(f"Glass House pricing sheet error: {message}")
+    return response_data.get("table", {}).get("rows", [])
+
+
+def google_visualization_cell(rows, row_index, column_index):
+    """Read the unformatted value from one sparse Visualization API cell."""
+    if row_index >= len(rows):
+        return ""
+    cells = rows[row_index].get("c") or []
+    if column_index >= len(cells) or cells[column_index] is None:
+        return ""
+    return cells[column_index].get("v", "")
+
+
+def parse_glass_house_option(rows, sheet_name):
+    """Validate and convert one Glass House tab into quotation-ready rows."""
+    option_label = str(google_visualization_cell(rows, 0, 1)).strip().upper()
+    expected_option = "OPTION 1" if str(sheet_name).upper().endswith(("OP1", "OP 1")) or str(sheet_name).lower().endswith("op1") else "OPTION 2"
+    if option_label != expected_option:
+        raise ValueError(
+            f"{sheet_name} is labelled '{option_label or 'blank'}', expected "
+            f"'{expected_option}'."
+        )
+
+    scope_rows = []
+    item_total = 0.0
+    sheet_subtotal = None
+    for row_index in range(len(rows)):
+        item_number = google_visualization_cell(rows, row_index, 0)
+        description = str(
+            google_visualization_cell(rows, row_index, 1) or ""
+        ).strip()
+        description_upper = description.upper()
+
+        if description_upper == "TOTAL":
+            sheet_subtotal = float(
+                google_visualization_cell(rows, row_index, 5) or 0
+            )
+            continue
+        if description_upper in {"VAT", "TOTAL (+VAT)"}:
+            continue
+        if (
+            str(item_number or "").strip().upper() in {"NO.", "NO"}
+            and description_upper == "ITEM"
+        ):
+            continue
+
+        if (
+            description
+            and not item_number
+            and description_upper not in {"OPTION 1", "OPTION 2"}
+        ):
+            scope_rows.append(
+                {
+                    "No.": "",
+                    "Item": description,
+                    "Unit": "",
+                    "QTY": "",
+                    "Rate": "",
+                    "Total (EGP)": "",
+                    "Row Type": "section",
+                }
+            )
+            continue
+
+        if not item_number or not description:
+            continue
+
+        quantity = float(google_visualization_cell(rows, row_index, 3) or 0)
+        selling_rate = float(google_visualization_cell(rows, row_index, 4) or 0)
+        line_total = float(google_visualization_cell(rows, row_index, 5) or 0)
+        if quantity <= 0 or selling_rate < 0 or line_total < 0:
+            raise ValueError(f"{sheet_name} contains an invalid quantity or selling value.")
+        if abs((quantity * selling_rate) - line_total) > 0.02:
+            raise ValueError(
+                f"{sheet_name} item {item_number} does not equal Qty x Selling Rate."
+            )
+
+        scope_rows.append(
+            {
+                "No.": str(item_number),
+                "Item": description,
+                "Unit": str(
+                    google_visualization_cell(rows, row_index, 2) or ""
+                ),
+                "QTY": quantity,
+                "Rate": selling_rate,
+                "Total (EGP)": line_total,
+                "Row Type": "item",
+            }
+        )
+        item_total += line_total
+
+    if sheet_subtotal is None:
+        raise ValueError(f"{sheet_name} does not contain a selling subtotal.")
+    if not any(row["Row Type"] == "item" for row in scope_rows):
+        raise ValueError(f"{sheet_name} does not contain any priced breakdown items.")
+    if abs(item_total - sheet_subtotal) > 0.02:
+        raise ValueError(
+            f"{sheet_name} subtotal does not equal the sum of its selling items."
+        )
+
+    scope_rows.append(
+        {
+            "No.": "",
+            "Item": "TOTAL",
+            "Unit": "",
+            "QTY": "",
+            "Rate": "",
+            "Total (EGP)": sheet_subtotal,
+            "Row Type": "total",
+        }
+    )
+    return {
+        "Sheet Name": sheet_name,
+        "Option Label": option_label.title(),
+        "Subtotal": sheet_subtotal,
+        "Scope Rows": scope_rows,
+    }
+
+
+@st.cache_data(ttl=60)
+def load_glass_house_option(base_url, sheet_name):
+    """Load raw formula results so rounded display formatting cannot alter BOQ data."""
+    sheet_id = base_url.split("/d/")[1].split("/")[0]
+    response = requests.get(
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq",
+        params={
+            "tqx": "out:json",
+            "sheet": sheet_name,
+            "range": "A1:F20",
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    rows = parse_google_visualization_response(response.text)
+    return parse_glass_house_option(rows, sheet_name)
+
 # ==========================================
 # 1. CORE DATA LOADING ENGINE (GOOGLE SHEETS)
 # ==========================================
@@ -439,6 +691,12 @@ if 'ac_breakdown_doc_url' not in st.session_state:
     st.session_state.ac_breakdown_doc_url = None
 if 'ac_breakdown_pdf_url' not in st.session_state:
     st.session_state.ac_breakdown_pdf_url = None
+if 'priced_breakdown_doc_url' not in st.session_state:
+    st.session_state.priced_breakdown_doc_url = None
+if 'priced_breakdown_pdf_url' not in st.session_state:
+    st.session_state.priced_breakdown_pdf_url = None
+if 'priced_breakdown_category' not in st.session_state:
+    st.session_state.priced_breakdown_category = None
 
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
@@ -446,6 +704,9 @@ if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.session_state.pdf_url = None
     st.session_state.ac_breakdown_doc_url = None
     st.session_state.ac_breakdown_pdf_url = None
+    st.session_state.priced_breakdown_doc_url = None
+    st.session_state.priced_breakdown_pdf_url = None
+    st.session_state.priced_breakdown_category = None
     st.rerun()
 
 st.title("🏗️ Extra Works Quotation Engine")
@@ -626,8 +887,17 @@ if df_fact is not None and not df_fact.empty:
     selected_request_type = st.selectbox("Select Official Request Type", request_options)
     if st.session_state.get('last_master_request') != selected_request_type:
         st.session_state.staged_items = []
+        st.session_state.doc_url = None
+        st.session_state.pdf_url = None
+        st.session_state.ac_breakdown_doc_url = None
+        st.session_state.ac_breakdown_pdf_url = None
+        st.session_state.priced_breakdown_doc_url = None
+        st.session_state.priced_breakdown_pdf_url = None
+        st.session_state.priced_breakdown_category = None
         if selected_request_type == "A.C":
             st.session_state.ac_context = None
+        if selected_request_type == "Glass House":
+            st.session_state.glass_house_context = None
         st.session_state.last_master_request = selected_request_type
 
     if selected_request_type == "Roof Room":
@@ -1907,6 +2177,173 @@ if df_fact is not None and not df_fact.empty:
                 st.session_state.ac_selection_revision += 1
                 st.rerun()
 
+    elif selected_request_type == "Glass House":
+        st.markdown("### 🏠 Glass House Quotation Builder")
+        st.caption(
+            "The system identifies the correct G or J pricing group from FACT. "
+            "Choose only the glass specification option."
+        )
+
+        attach_priced_glass_house_scope = st.checkbox(
+            "Include prices in the detailed scope attached to the quotation",
+            value=False,
+            help=(
+                "Normally leave this unchecked. A separate priced breakdown "
+                "file is always generated."
+            ),
+            key=f"attach_priced_glass_house_scope_{selected_unit}",
+        )
+        st.caption(
+            "A separate priced breakdown (Google Doc and PDF) will always be "
+            "generated with the same quotation number."
+        )
+
+        try:
+            resolved_glass_house = resolve_glass_house_context(
+                selected_unit,
+                unit_type,
+                unit_design_type,
+                unit_design_opt,
+            )
+        except ValueError as glass_house_context_error:
+            st.session_state.staged_items = []
+            st.error(str(glass_house_context_error))
+            st.info(
+                "Select an eligible Type G or Type J townhouse, or correct its "
+                "FACT classification before generating the quotation."
+            )
+            st.stop()
+
+        glass_house_context = (
+            f"{selected_unit}|{resolved_glass_house['Price Group']}|glass_house_v1"
+        )
+        if st.session_state.get("glass_house_context") != glass_house_context:
+            st.session_state.glass_house_context = glass_house_context
+            st.session_state.glass_house_detailed_scope_items = []
+            st.session_state.staged_items = []
+
+        context_columns = st.columns(3)
+        context_columns[0].metric(
+            "Design Family",
+            resolved_glass_house["Design Family"],
+        )
+        context_columns[1].metric(
+            "Unit Variant",
+            resolved_glass_house["Variant"],
+        )
+        context_columns[2].metric(
+            "Pricing Group",
+            resolved_glass_house["Price Group"],
+        )
+
+        glass_house_option_number = st.radio(
+            "Select Glass Specification",
+            options=[1, 2],
+            format_func=lambda option: (
+                "Option 1 — Three-layer 6 mm glass ceiling"
+                if option == 1
+                else "Option 2 — Two-layer 6 mm glass ceiling"
+            ),
+            horizontal=True,
+            key=f"glass_house_option_{glass_house_context}",
+        )
+        glass_house_sheet_name = glass_house_tab_name(
+            resolved_glass_house["Price Group"],
+            glass_house_option_number,
+        )
+
+        try:
+            glass_house_option = load_glass_house_option(
+                GLASS_HOUSE_SHEET_URL,
+                glass_house_sheet_name,
+            )
+        except Exception as glass_house_sheet_error:
+            st.session_state.glass_house_detailed_scope_items = []
+            st.session_state.staged_items = []
+            st.error(
+                "Glass House pricing could not be validated from the live sheet: "
+                f"{glass_house_sheet_error}"
+            )
+            st.info(
+                "Generation is blocked so a missing, rounded, or inconsistent "
+                "selling value cannot enter the quotation."
+            )
+            st.stop()
+
+        glass_house_scope_rows = glass_house_option["Scope Rows"]
+        glass_house_subtotal = float(glass_house_option["Subtotal"])
+        glass_house_option_label = f"Option {glass_house_option_number}"
+        glass_house_option_description = (
+            "Three-layer 6 mm glass ceiling"
+            if glass_house_option_number == 1
+            else "Two-layer 6 mm glass ceiling"
+        )
+        glass_house_lookup_name = (
+            f"Glass House - {resolved_glass_house['Price Group']} - "
+            f"{glass_house_option_label}"
+        )
+
+        st.session_state.glass_house_detailed_scope_items = (
+            glass_house_scope_rows
+        )
+        st.session_state.staged_items = [
+            {
+                "No.": 1,
+                "Description": (
+                    "Required fees for supplying and installing Glass House "
+                    "works as per the attached detailed scope."
+                ),
+                "Unit": "LS",
+                "QTY": 1.0,
+                "Rate": glass_house_subtotal,
+                "Total Amount": glass_house_subtotal,
+                "Lookup Name": glass_house_lookup_name,
+            }
+        ]
+
+        st.markdown("##### Selected Live-Sheet Breakdown")
+        glass_house_item_rows = [
+            row
+            for row in glass_house_scope_rows
+            if row["Row Type"] == "item"
+        ]
+        st.dataframe(
+            pd.DataFrame(glass_house_item_rows)[
+                ["No.", "Item", "Unit", "QTY", "Rate", "Total (EGP)"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "QTY": st.column_config.NumberColumn("QTY", format="%.4f"),
+                "Rate": st.column_config.NumberColumn(
+                    "Selling Rate (EGP)",
+                    format="%.2f",
+                ),
+                "Total (EGP)": st.column_config.NumberColumn(
+                    "Total (EGP)",
+                    format="%.2f",
+                ),
+            },
+        )
+        st.info(
+            f"Source: {glass_house_sheet_name} · {glass_house_option_description}. "
+            "The commercial quotation will show one lump-sum value. The table "
+            f"on its last page will be "
+            f"{'priced' if attach_priced_glass_house_scope else 'unpriced'}."
+        )
+
+        glass_house_vat = glass_house_subtotal * 0.14
+        glass_house_total_with_vat = glass_house_subtotal + glass_house_vat
+        total_columns = st.columns(2)
+        total_columns[0].metric(
+            "Total (EGP)",
+            f"{glass_house_subtotal:,.2f} EGP",
+        )
+        total_columns[1].metric(
+            "Total with 14% VAT (EGP)",
+            f"{glass_house_total_with_vat:,.2f} EGP",
+        )
+
     else:
         st.markdown(f"### 📝 Custom BOQ Entry Table: {selected_request_type}")
         st.info("💡 **Tip:** Type smoothly in the center! The read-only previews calculate No., Unit, Rate, and Total instantly.")
@@ -2512,7 +2949,7 @@ if df_fact is not None and not df_fact.empty:
                     with st.spinner("Transmitting to Google Workspace..."):
                         
                         resolved_req_name = selected_request_type
-                        if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                        if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture", "Glass House"] and 'Lookup Name' in st.session_state.staged_items[0]:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
@@ -2557,6 +2994,20 @@ if df_fact is not None and not df_fact.empty:
                                     [],
                                 )
                             )
+                        elif selected_request_type == "Glass House":
+                            payload["requestCategory"] = "Glass House"
+                            payload["priceAttachedDetailedScope"] = bool(
+                                st.session_state.get(
+                                    f"attach_priced_glass_house_scope_{selected_unit}",
+                                    False,
+                                )
+                            )
+                            payload["detailedScopeItems"] = (
+                                st.session_state.get(
+                                    "glass_house_detailed_scope_items",
+                                    [],
+                                )
+                            )
                                 
                         try:
                             headers = {"Content-Type": "application/json"}
@@ -2575,6 +3026,17 @@ if df_fact is not None and not df_fact.empty:
                                     )
                                     st.session_state.ac_breakdown_pdf_url = (
                                         response_data.get("pricedBreakdownPdfUrl")
+                                    )
+                                    st.session_state.priced_breakdown_doc_url = (
+                                        response_data.get("pricedBreakdownDocUrl")
+                                    )
+                                    st.session_state.priced_breakdown_pdf_url = (
+                                        response_data.get("pricedBreakdownPdfUrl")
+                                    )
+                                    st.session_state.priced_breakdown_category = (
+                                        selected_request_type
+                                        if response_data.get("pricedBreakdownDocUrl")
+                                        else None
                                     )
                                     st.rerun()
                                 else:
@@ -2627,7 +3089,7 @@ if df_fact is not None and not df_fact.empty:
                 )
                 
                 disp_req_name = selected_request_type
-                if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture"] and 'Lookup Name' in st.session_state.staged_items[0]:
+                if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture", "Glass House"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
                 pdf.cell(
                     0,
@@ -2762,21 +3224,27 @@ if df_fact is not None and not df_fact.empty:
                     st.components.v1.html(js_share_component, height=55)
 
                 if (
-                    st.session_state.ac_breakdown_doc_url
-                    and st.session_state.ac_breakdown_pdf_url
+                    st.session_state.priced_breakdown_doc_url
+                    and st.session_state.priced_breakdown_pdf_url
                 ):
-                    st.markdown("#### 📊 Mandatory A.C Priced Breakdown")
+                    breakdown_category = (
+                        st.session_state.priced_breakdown_category
+                        or "Detailed Scope"
+                    )
+                    st.markdown(
+                        f"#### 📊 Mandatory {breakdown_category} Priced Breakdown"
+                    )
                     breakdown_col1, breakdown_col2 = st.columns(2)
                     with breakdown_col1:
                         st.link_button(
                             "📄 Open Priced Breakdown",
-                            st.session_state.ac_breakdown_doc_url,
+                            st.session_state.priced_breakdown_doc_url,
                             use_container_width=True,
                         )
                     with breakdown_col2:
                         st.link_button(
                             "💾 View / Download Priced Breakdown PDF",
-                            st.session_state.ac_breakdown_pdf_url,
+                            st.session_state.priced_breakdown_pdf_url,
                             use_container_width=True,
                         )
 else:
