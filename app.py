@@ -2362,7 +2362,7 @@ if df_fact is not None and not df_fact.empty:
                 "desc": "Supply & Install Khashamonium Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
             },
             "Retractable": {
-                "rate": 67500.0,
+                "rate": 37500.0,
                 "desc": "Supply and install a landscape retractable pergola as per attached drawings including Motor and Fabric."
             }
         }
