@@ -2354,7 +2354,7 @@ if df_fact is not None and not df_fact.empty:
                 "desc": "Supply & Install Musky Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
             },
             "Pitch Pine": {
-                "rate": 6470.0,
+                "rate": 5883.0,
                 "desc": "Supply & Install Pitch pine Pergola (as per the attached drawing, standard pergola with Height 270cm), including fabrics and without lighting fixture."
             },
             "Khashamonium": {
