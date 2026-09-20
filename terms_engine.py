@@ -388,3 +388,48 @@ def generate_terms(
         "generatedTermsAndConditions": final_text,
     }
     return final_text, calculated
+
+
+def apply_roof_room_contract_terms(terms_text: str, approval_required: bool) -> str:
+    """Add the fixed Roof Room maximum-period and conditional approval clauses."""
+    mobilization_clause = (
+        "Mobilization Period: The mobilization period shall be forty-five (45) "
+        "calendar days following the payment date."
+    )
+    construction_clause = (
+        "Construction Period: The construction period shall be one hundred fifty "
+        "(150) calendar days following the mobilization period and receipt of the "
+        "Issued for Construction (IFC) drawings from the client, if applicable."
+    )
+    grace_clause = (
+        "Grace Period: A grace period of thirty (30) calendar days will be granted "
+        "following the construction period."
+    )
+    maximum_clause = (
+        "Maximum Contractual Period: The total maximum contractual period shall be "
+        "two hundred twenty-five (225) calendar days, comprising forty-five (45) "
+        "days for mobilization, one hundred fifty (150) days for construction, and "
+        "thirty (30) days as a grace period."
+    )
+    approval_clause = (
+        "Commercial Approval: This quotation and its commercial terms are subject "
+        "to Ghandour approval."
+    )
+    lines = []
+    timeline_inserted = False
+    for line in (terms_text or "").splitlines():
+        normalized = line.strip().lower()
+        if normalized.startswith(("start date:", "end date:", "grace period:")):
+            if not timeline_inserted:
+                lines.extend([mobilization_clause, construction_clause, grace_clause])
+                timeline_inserted = True
+            continue
+        if normalized.startswith(("maximum contractual period:", "commercial approval:")):
+            continue
+        lines.append(line)
+    if not timeline_inserted:
+        lines.extend([mobilization_clause, construction_clause, grace_clause])
+    lines.append(maximum_clause)
+    if approval_required:
+        lines.append(approval_clause)
+    return "\n".join(line for line in lines if line.strip())
