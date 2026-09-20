@@ -390,8 +390,8 @@ def generate_terms(
     return final_text, calculated
 
 
-def apply_roof_room_contract_terms(terms_text: str, approval_required: bool) -> str:
-    """Add the fixed Roof Room maximum-period and conditional approval clauses."""
+def apply_roof_room_contract_terms(terms_text: str) -> str:
+    """Apply the fixed post-delivery Roof Room execution timeline."""
     mobilization_clause = (
         "Mobilization Period: The mobilization period shall be forty-five (45) "
         "calendar days following the payment date."
@@ -411,10 +411,6 @@ def apply_roof_room_contract_terms(terms_text: str, approval_required: bool) -> 
         "days for mobilization, one hundred fifty (150) days for construction, and "
         "thirty (30) days as a grace period."
     )
-    approval_clause = (
-        "Commercial Approval: This quotation and its commercial terms are subject "
-        "to Ghandour approval."
-    )
     lines = []
     timeline_inserted = False
     for line in (terms_text or "").splitlines():
@@ -430,6 +426,4 @@ def apply_roof_room_contract_terms(terms_text: str, approval_required: bool) -> 
     if not timeline_inserted:
         lines.extend([mobilization_clause, construction_clause, grace_clause])
     lines.append(maximum_clause)
-    if approval_required:
-        lines.append(approval_clause)
     return "\n".join(line for line in lines if line.strip())
