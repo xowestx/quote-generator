@@ -7,9 +7,17 @@ import requests
 import json
 
 from terms_engine import (
+    apply_roof_room_contract_terms,
     generate_terms,
     parse_terms_defaults,
     validate_terms_values,
+)
+from roof_room_engine import (
+    ROOF_ROOM_CONSTRUCTION_DAYS,
+    ROOF_ROOM_GRACE_DAYS,
+    ROOF_ROOM_MAXIMUM_CONTRACT_DAYS,
+    ROOF_ROOM_MOBILIZATION_DAYS,
+    select_roof_room_scenarios,
 )
 
 # Verified Room-by-Room Furniture Rate Mapping
@@ -898,6 +906,8 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.ac_context = None
         if selected_request_type == "Glass House":
             st.session_state.glass_house_context = None
+        if selected_request_type == "Roof Room":
+            st.session_state.roof_room_context = None
         st.session_state.last_master_request = selected_request_type
 
     if selected_request_type == "Roof Room":
@@ -974,36 +984,76 @@ if df_fact is not None and not df_fact.empty:
                 return f"{row[prod_area_col]} sqm - {row[desc_col_text]}"
             chosen_idx = st.selectbox("Select Roof Room Variant", filtered_catalog.index, format_func=format_scope)
             product_record = filtered_catalog.loc[chosen_idx]
-            chosen_cat = str(product_record.get(cat_col, "Roof Room"))
-
-        with col_fin:
-            rate_cat_col = df_rates.columns[0]
-            category_rates = df_rates[df_rates[rate_cat_col].str.upper() == chosen_cat.upper()]
-            if category_rates.empty: category_rates = df_rates
-            rate_opt_col = df_rates.columns[2] if len(df_rates.columns) > 2 else df_rates.columns[-1]
-            rate_val_col = df_rates.columns[1]
-            chosen_term_option = st.selectbox("Financing & Installment Plan", category_rates[rate_opt_col].unique())
-            rate_record = category_rates[category_rates[rate_opt_col] == chosen_term_option].iloc[0]
 
         try: target_item_qty = float(product_record[prod_area_col])
         except: target_item_qty = 0.0
-            
+
+        required_scenario_columns = {
+            "Category", "Rate (per sqm)", "Options", "Area Group",
+            "Down Payment", "Months", "Approval",
+        }
+        missing_scenario_columns = required_scenario_columns.difference(df_rates.columns)
+        if missing_scenario_columns:
+            st.error(
+                "The RATES tab is missing required Roof Room columns: "
+                + ", ".join(sorted(missing_scenario_columns))
+            )
+            st.stop()
+
         try:
-            rate_val = str(rate_record[rate_val_col]).replace(',', '').replace('$', '').strip()
-            unit_base_cost_rate = float(rate_val)
-        except: unit_base_cost_rate = 0.0
+            eligible_roof_scenarios = select_roof_room_scenarios(
+                df_rates.to_dict("records"), target_item_qty
+            )
+        except (TypeError, ValueError) as error:
+            st.error(f"Roof Room commercial scenarios are invalid: {error}")
+            st.stop()
+
+        with col_fin:
+            def format_roof_scenario(scenario):
+                approval_note = (
+                    " | Subject to Ghandour approval"
+                    if scenario["Approval"].strip().lower() != "no"
+                    else ""
+                )
+                return (
+                    f'{scenario["Scenario ID"]} — '
+                    f'EGP {scenario["Gross Rate"]:,.0f}/m² incl. VAT | '
+                    f'{scenario["Down Payment"]:g}% DP | '
+                    f'{scenario["Months"]} months{approval_note}'
+                )
+
+            selected_roof_scenario = st.selectbox(
+                "Commercial Scenario",
+                eligible_roof_scenarios,
+                format_func=format_roof_scenario,
+            )
+
+        unit_base_cost_rate = float(selected_roof_scenario["Net Rate"])
+        chosen_term_option = selected_roof_scenario["Scenario ID"]
+        roof_room_approval_required = (
+            str(selected_roof_scenario["Approval"]).strip().lower() != "no"
+        )
+        st.session_state.roof_room_context = {
+            **selected_roof_scenario,
+            "Area": target_item_qty,
+            "Approval Required": roof_room_approval_required,
+            "Terms Lookup Name": "Roof Room - 6 months",
+        }
+
+        if roof_room_approval_required:
+            st.warning(
+                "This commercial scenario is subject to Ghandour approval. "
+                "The condition will be included in the quotation Terms & Conditions."
+            )
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
         formatted_qty = int(target_item_qty) if target_item_qty.is_integer() else target_item_qty
         custom_roof_description = f'Required Fees for adding {formatted_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
         
-        financing_name_suffix = " - 6 months" if "6" in str(chosen_term_option) else " - 24 months" if "24" in str(chosen_term_option) else " - 2 Years"
-        resolved_request_name = "Roof Room" + financing_name_suffix
-        
         st.session_state.staged_items = [{
             'No.': 1, 'Description': custom_roof_description, 'Unit': 'LS', 'QTY': 1.0, 
             'Rate': calculated_line_item_total, 'Total Amount': calculated_line_item_total,
-            'Financing Options': chosen_term_option, 'Lookup Name': resolved_request_name
+            'Financing Options': chosen_term_option, 'Lookup Name': "Roof Room"
         }]
         
         st.markdown("### 📊 Generated BOQ Summary")
@@ -2758,8 +2808,12 @@ if df_fact is not None and not df_fact.empty:
     # --- SECTION 3B: QUOTATION-SPECIFIC TERMS & DURATION ---
     if st.session_state.staged_items:
         terms_lookup_name = selected_request_type
+        if selected_request_type == "Roof Room":
+            terms_lookup_name = st.session_state.get("roof_room_context", {}).get(
+                "Terms Lookup Name", "Roof Room - 6 months"
+            )
         if (
-            selected_request_type in ["Roof Room", "Closing Double Height"]
+            selected_request_type == "Closing Double Height"
             and "Lookup Name" in st.session_state.staged_items[0]
         ):
             terms_lookup_name = st.session_state.staged_items[0]["Lookup Name"]
@@ -2803,6 +2857,21 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.qt_validity_days = defaults.offer_validity_days
             st.session_state.qt_extraction_warnings = extraction_warnings
 
+        roof_room_terms_locked = selected_request_type == "Roof Room"
+        if roof_room_terms_locked:
+            roof_context = st.session_state.get("roof_room_context", {})
+            st.session_state.qt_delivery_stage = "Post-Delivery"
+            st.session_state.qt_master_duration_months = 5
+            st.session_state.qt_duration_months = 5
+            st.session_state.qt_last_delivery_stage = "Post-Delivery"
+            st.session_state.qt_down_payment = float(
+                roof_context.get("Down Payment", 0)
+            )
+            st.session_state.qt_payment_term_months = int(
+                roof_context.get("Months", 1)
+            )
+            st.session_state.qt_frequency = "Monthly"
+
         st.markdown("### Quotation Terms & Duration")
         st.caption(
             "The product's master Terms & Conditions remain unchanged. "
@@ -2826,6 +2895,7 @@ if df_fact is not None and not df_fact.empty:
             "Delivery Stage",
             ["Pre-Construction", "Post-Delivery"],
             key="qt_delivery_stage",
+            disabled=roof_room_terms_locked,
         )
 
         # Apply the stage-specific default only when the stage changes. The user
@@ -2848,6 +2918,7 @@ if df_fact is not None and not df_fact.empty:
                 max_value=100.0,
                 step=0.5,
                 key="qt_down_payment",
+                disabled=roof_room_terms_locked,
             )
         with payment_col2:
             st.number_input(
@@ -2855,12 +2926,14 @@ if df_fact is not None and not df_fact.empty:
                 min_value=1,
                 step=1,
                 key="qt_payment_term_months",
+                disabled=roof_room_terms_locked,
             )
         with payment_col3:
             st.selectbox(
                 "Installment Frequency",
                 ["Monthly", "Quarterly"],
                 key="qt_frequency",
+                disabled=roof_room_terms_locked,
             )
 
         # Row 3: Duration / handover extension only.
@@ -2869,7 +2942,21 @@ if df_fact is not None and not df_fact.empty:
             min_value=0,
             step=1,
             key="qt_duration_months",
+            disabled=roof_room_terms_locked,
+            help=(
+                "Roof Room construction is fixed at 150 days (5 months)."
+                if roof_room_terms_locked else None
+            ),
         )
+
+        if roof_room_terms_locked:
+            timeline_col1, timeline_col2, timeline_col3, timeline_col4 = st.columns(4)
+            timeline_col1.metric("Mobilization", f"{ROOF_ROOM_MOBILIZATION_DAYS} days")
+            timeline_col2.metric("Construction", f"{ROOF_ROOM_CONSTRUCTION_DAYS} days")
+            timeline_col3.metric("Grace Period", f"{ROOF_ROOM_GRACE_DAYS} days")
+            timeline_col4.metric(
+                "Maximum Contract Period", f"{ROOF_ROOM_MAXIMUM_CONTRACT_DAYS} days"
+            )
 
         validation_errors = validate_terms_values(
             st.session_state.qt_duration_months,
@@ -2912,6 +2999,24 @@ if df_fact is not None and not df_fact.empty:
                 installment_frequency=st.session_state.qt_frequency,
                 offer_validity_days=int(st.session_state.qt_validity_days),
             )
+            if roof_room_terms_locked:
+                roof_context = st.session_state.get("roof_room_context", {})
+                generated_terms_text = apply_roof_room_contract_terms(
+                    generated_terms_text,
+                    bool(roof_context.get("Approval Required", False)),
+                )
+                quotation_terms_data.update({
+                    "generatedTermsAndConditions": generated_terms_text,
+                    "roofRoomScenario": roof_context.get("Scenario ID", ""),
+                    "roofRoomAreaGroup": roof_context.get("Area Group", ""),
+                    "roofRoomApprovalRequired": bool(
+                        roof_context.get("Approval Required", False)
+                    ),
+                    "mobilizationDays": ROOF_ROOM_MOBILIZATION_DAYS,
+                    "constructionDays": ROOF_ROOM_CONSTRUCTION_DAYS,
+                    "gracePeriodDays": ROOF_ROOM_GRACE_DAYS,
+                    "maximumContractualPeriodDays": ROOF_ROOM_MAXIMUM_CONTRACT_DAYS,
+                })
 
         for validation_error in validation_errors:
             st.error(validation_error)
