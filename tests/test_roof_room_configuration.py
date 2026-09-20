@@ -64,8 +64,13 @@ class RoofRoomConfigurationTests(unittest.TestCase):
         self.assertIn('roof_room_terms_locked = selected_request_type == "Roof Room"', APP_SOURCE)
         self.assertIn('disabled=roof_room_terms_locked', APP_SOURCE)
         self.assertIn('apply_roof_room_contract_terms(', APP_SOURCE)
+        delivery_widget = APP_SOURCE.split('st.selectbox(\n            "Delivery Stage"', 1)[1].split(')', 1)[0]
+        self.assertNotIn("disabled=", delivery_widget)
+        self.assertNotIn(
+            "The condition will be included in the quotation Terms & Conditions.",
+            APP_SOURCE,
+        )
 
 
 if __name__ == "__main__":
     unittest.main()
-
