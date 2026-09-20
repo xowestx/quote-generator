@@ -163,17 +163,14 @@ class TermsEngineTests(unittest.TestCase):
             down_payment_percent=30,
             payment_term_months=30,
         )
-        approved_terms = apply_roof_room_contract_terms(base_terms, True)
-        self.assertIn("forty-five (45) calendar days", approved_terms)
-        self.assertIn("one hundred fifty (150) calendar days", approved_terms)
-        self.assertIn("thirty (30) calendar days", approved_terms)
-        self.assertIn("two hundred twenty-five (225) calendar days", approved_terms)
-        self.assertIn("subject to Ghandour approval", approved_terms)
-        self.assertNotIn("(120) calendar days", approved_terms)
-
-        standard_terms = apply_roof_room_contract_terms(base_terms, False)
-        self.assertIn("two hundred twenty-five (225) calendar days", standard_terms)
-        self.assertNotIn("Commercial Approval:", standard_terms)
+        roof_terms = apply_roof_room_contract_terms(base_terms)
+        self.assertIn("forty-five (45) calendar days", roof_terms)
+        self.assertIn("one hundred fifty (150) calendar days", roof_terms)
+        self.assertIn("thirty (30) calendar days", roof_terms)
+        self.assertIn("two hundred twenty-five (225) calendar days", roof_terms)
+        self.assertNotIn("subject to Ghandour approval", roof_terms)
+        self.assertNotIn("Commercial Approval:", roof_terms)
+        self.assertNotIn("(120) calendar days", roof_terms)
 
 
 if __name__ == "__main__":
