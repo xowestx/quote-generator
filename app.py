@@ -1042,8 +1042,7 @@ if df_fact is not None and not df_fact.empty:
 
         if roof_room_approval_required:
             st.warning(
-                "This commercial scenario is subject to Ghandour approval. "
-                "The condition will be included in the quotation Terms & Conditions."
+                "This commercial scenario is subject to Ghandour approval."
             )
             
         calculated_line_item_total = target_item_qty * unit_base_cost_rate
@@ -2860,10 +2859,7 @@ if df_fact is not None and not df_fact.empty:
         roof_room_terms_locked = selected_request_type == "Roof Room"
         if roof_room_terms_locked:
             roof_context = st.session_state.get("roof_room_context", {})
-            st.session_state.qt_delivery_stage = "Post-Delivery"
             st.session_state.qt_master_duration_months = 5
-            st.session_state.qt_duration_months = 5
-            st.session_state.qt_last_delivery_stage = "Post-Delivery"
             st.session_state.qt_down_payment = float(
                 roof_context.get("Down Payment", 0)
             )
@@ -2895,7 +2891,6 @@ if df_fact is not None and not df_fact.empty:
             "Delivery Stage",
             ["Pre-Construction", "Post-Delivery"],
             key="qt_delivery_stage",
-            disabled=roof_room_terms_locked,
         )
 
         # Apply the stage-specific default only when the stage changes. The user
@@ -2905,9 +2900,15 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.qt_duration_months = (
                 6
                 if current_delivery_stage == "Pre-Construction"
-                else st.session_state.get("qt_master_duration_months", 0)
+                else (
+                    5 if roof_room_terms_locked
+                    else st.session_state.get("qt_master_duration_months", 0)
+                )
             )
             st.session_state.qt_last_delivery_stage = current_delivery_stage
+
+        if roof_room_terms_locked and current_delivery_stage == "Post-Delivery":
+            st.session_state.qt_duration_months = 5
 
         # Row 2: Only the editable payment-plan factors.
         payment_col1, payment_col2, payment_col3 = st.columns(3)
@@ -2944,12 +2945,13 @@ if df_fact is not None and not df_fact.empty:
             key="qt_duration_months",
             disabled=roof_room_terms_locked,
             help=(
-                "Roof Room construction is fixed at 150 days (5 months)."
-                if roof_room_terms_locked else None
+                "Post-delivery Roof Room construction is fixed at 150 days (5 months)."
+                if roof_room_terms_locked and current_delivery_stage == "Post-Delivery"
+                else None
             ),
         )
 
-        if roof_room_terms_locked:
+        if roof_room_terms_locked and current_delivery_stage == "Post-Delivery":
             timeline_col1, timeline_col2, timeline_col3, timeline_col4 = st.columns(4)
             timeline_col1.metric("Mobilization", f"{ROOF_ROOM_MOBILIZATION_DAYS} days")
             timeline_col2.metric("Construction", f"{ROOF_ROOM_CONSTRUCTION_DAYS} days")
@@ -3001,10 +3003,10 @@ if df_fact is not None and not df_fact.empty:
             )
             if roof_room_terms_locked:
                 roof_context = st.session_state.get("roof_room_context", {})
-                generated_terms_text = apply_roof_room_contract_terms(
-                    generated_terms_text,
-                    bool(roof_context.get("Approval Required", False)),
-                )
+                if current_delivery_stage == "Post-Delivery":
+                    generated_terms_text = apply_roof_room_contract_terms(
+                        generated_terms_text
+                    )
                 quotation_terms_data.update({
                     "generatedTermsAndConditions": generated_terms_text,
                     "roofRoomScenario": roof_context.get("Scenario ID", ""),
