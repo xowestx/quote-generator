@@ -405,12 +405,6 @@ def apply_roof_room_contract_terms(terms_text: str) -> str:
         "Grace Period: A grace period of thirty (30) calendar days will be granted "
         "following the construction period."
     )
-    maximum_clause = (
-        "Maximum Contractual Period: The total maximum contractual period shall be "
-        "two hundred twenty-five (225) calendar days, comprising forty-five (45) "
-        "days for mobilization, one hundred fifty (150) days for construction, and "
-        "thirty (30) days as a grace period."
-    )
     lines = []
     timeline_inserted = False
     for line in (terms_text or "").splitlines():
@@ -425,5 +419,4 @@ def apply_roof_room_contract_terms(terms_text: str) -> str:
         lines.append(line)
     if not timeline_inserted:
         lines.extend([mobilization_clause, construction_clause, grace_clause])
-    lines.append(maximum_clause)
     return "\n".join(line for line in lines if line.strip())
