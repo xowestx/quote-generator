@@ -2851,8 +2851,16 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.qt_down_payment = defaults.down_payment_percent
             st.session_state.qt_due_event = defaults.due_event
             st.session_state.qt_custom_due_event = defaults.custom_due_event
-            st.session_state.qt_payment_term_months = defaults.payment_term_months
-            st.session_state.qt_frequency = defaults.installment_frequency
+            st.session_state.qt_payment_term_months = (
+                48
+                if selected_request_type == "Land Extension"
+                else defaults.payment_term_months
+            )
+            st.session_state.qt_frequency = (
+                "Monthly"
+                if selected_request_type == "Land Extension"
+                else defaults.installment_frequency
+            )
             st.session_state.qt_validity_days = defaults.offer_validity_days
             st.session_state.qt_extraction_warnings = extraction_warnings
 
