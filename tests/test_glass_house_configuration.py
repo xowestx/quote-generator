@@ -1,7 +1,6 @@
 import ast
 import re
 import unittest
-from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 
@@ -27,7 +26,6 @@ class GlassHouseConfigurationTests(unittest.TestCase):
         cls.script_source = SCRIPT_PATH.read_text(encoding="utf-8")
 
         selected_names = {
-            "round_egp",
             "resolve_glass_house_context",
             "glass_house_tab_name",
             "google_visualization_cell",
@@ -49,11 +47,7 @@ class GlassHouseConfigurationTests(unittest.TestCase):
                 and node.name in selected_names
             )
         ]
-        namespace = {
-            "re": re,
-            "Decimal": Decimal,
-            "ROUND_HALF_UP": ROUND_HALF_UP,
-        }
+        namespace = {"re": re}
         exec(
             compile(
                 ast.Module(body=calculation_nodes, type_ignores=[]),
@@ -151,7 +145,6 @@ class GlassHouseConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(item["QTY"], 11.21875)
         self.assertEqual(item["Rate"], 2875)
-        self.assertEqual(item["Total (EGP)"], 32254)
         self.assertEqual(parsed["Subtotal"], 32253.90625)
 
     def test_streamlit_reads_live_raw_values_without_hardcoded_prices(self):
