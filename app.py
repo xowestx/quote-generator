@@ -5,6 +5,7 @@ from fpdf import FPDF
 import re
 import requests
 import json
+from decimal import Decimal, ROUND_HALF_UP
 
 from terms_engine import (
     apply_roof_room_contract_terms,
@@ -19,6 +20,15 @@ from roof_room_engine import (
     ROOF_ROOM_MOBILIZATION_DAYS,
     select_roof_room_scenarios,
 )
+
+
+def round_egp(value):
+    """Round monetary totals to the nearest whole EGP (commercial half-up)."""
+    return int(
+        Decimal(str(value or 0)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
 
 # Verified Room-by-Room Furniture Rate Mapping
 FURNITURE_RATES = {
@@ -171,7 +181,7 @@ def build_ac_line_items(configuration, include_freon=True):
             "Unit": "NO.",
             "QTY": float(unit_qty),
             "Rate": equipment_selling_rate,
-            "Total Amount": float(unit_qty) * equipment_selling_rate,
+            "Total Amount": round_egp(float(unit_qty) * equipment_selling_rate),
         },
     ]
 
@@ -189,7 +199,7 @@ def build_ac_line_items(configuration, include_freon=True):
                 "Unit": "M",
                 "QTY": float(unit_qty) * freon_meters,
                 "Rate": AC_FREON_PIPE_RATE,
-                "Total Amount": (
+                "Total Amount": round_egp(
                     float(unit_qty) * freon_meters * AC_FREON_PIPE_RATE
                 ),
             }
@@ -211,7 +221,9 @@ def build_ac_line_items(configuration, include_freon=True):
                     "Unit": "NO.",
                     "QTY": float(unit_qty),
                     "Rate": AC_CONCEALED_DUCT_RATE,
-                    "Total Amount": float(unit_qty) * AC_CONCEALED_DUCT_RATE,
+                    "Total Amount": round_egp(
+                        float(unit_qty) * AC_CONCEALED_DUCT_RATE
+                    ),
                 },
                 {
                     **metadata,
@@ -224,7 +236,9 @@ def build_ac_line_items(configuration, include_freon=True):
                     "Unit": "M",
                     "QTY": float(unit_qty) * grille_meters,
                     "Rate": AC_GRILLE_RATE,
-                    "Total Amount": float(unit_qty) * grille_meters * AC_GRILLE_RATE,
+                    "Total Amount": round_egp(
+                        float(unit_qty) * grille_meters * AC_GRILLE_RATE
+                    ),
                 },
             ]
         )
@@ -295,7 +309,9 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
                     "Unit": "m",
                     "QTY": total_freon_meters,
                     "Rate": AC_FREON_PIPE_RATE,
-                    "Total (EGP)": total_freon_meters * AC_FREON_PIPE_RATE,
+                    "Total (EGP)": round_egp(
+                        total_freon_meters * AC_FREON_PIPE_RATE
+                    ),
                     "Row Type": "item",
                 },
             ]
@@ -336,7 +352,9 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
                 "Unit": "NO.",
                 "QTY": equipment_quantity,
                 "Rate": equipment_selling_rate,
-                "Total (EGP)": equipment_quantity * equipment_selling_rate,
+                "Total (EGP)": round_egp(
+                    equipment_quantity * equipment_selling_rate
+                ),
                 "Row Type": "item",
             }
         )
@@ -362,7 +380,9 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
                     "Unit": "Lm",
                     "QTY": total_grille_meters,
                     "Rate": AC_GRILLE_RATE,
-                    "Total (EGP)": total_grille_meters * AC_GRILLE_RATE,
+                    "Total (EGP)": round_egp(
+                        total_grille_meters * AC_GRILLE_RATE
+                    ),
                     "Row Type": "item",
                 },
                 {
@@ -374,7 +394,7 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
                     "Unit": "LS",
                     "QTY": 1,
                     "Rate": total_ductwork,
-                    "Total (EGP)": total_ductwork,
+                    "Total (EGP)": round_egp(total_ductwork),
                     "Row Type": "item",
                 },
             ]
@@ -387,11 +407,11 @@ def build_ac_detailed_scope_rows(configurations, include_freon=True):
             "Unit": "",
             "QTY": "",
             "Rate": "",
-            "Total (EGP)": sum(
+            "Total (EGP)": round_egp(sum(
                 float(row["Total (EGP)"])
                 for row in rows
                 if row["Row Type"] == "item"
-            ),
+            )),
             "Row Type": "total",
         }
     )
@@ -585,7 +605,7 @@ def parse_glass_house_option(rows, sheet_name):
                 ),
                 "QTY": quantity,
                 "Rate": selling_rate,
-                "Total (EGP)": line_total,
+                "Total (EGP)": round_egp(line_total),
                 "Row Type": "item",
             }
         )
@@ -607,7 +627,7 @@ def parse_glass_house_option(rows, sheet_name):
             "Unit": "",
             "QTY": "",
             "Rate": "",
-            "Total (EGP)": sheet_subtotal,
+            "Total (EGP)": round_egp(sheet_subtotal),
             "Row Type": "total",
         }
     )
@@ -1045,7 +1065,9 @@ if df_fact is not None and not df_fact.empty:
                 "This commercial scenario is subject to Ghandour approval."
             )
             
-        calculated_line_item_total = target_item_qty * unit_base_cost_rate
+        calculated_line_item_total = round_egp(
+            target_item_qty * unit_base_cost_rate
+        )
         formatted_qty = int(target_item_qty) if target_item_qty.is_integer() else target_item_qty
         custom_roof_description = f'Required Fees for adding {formatted_qty} m2 Roof Room as per attached Drawings " Core and Shell "'
         
@@ -1059,13 +1081,13 @@ if df_fact is not None and not df_fact.empty:
         summary_df = pd.DataFrame([{k: v for k, v in st.session_state.staged_items[0].items() if k not in ['Financing Options', 'Lookup Name']}])
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
         
-        subtotal = calculated_line_item_total
-        vat = subtotal * 0.14
+        subtotal = round_egp(calculated_line_item_total)
+        vat = round_egp(subtotal * 0.14)
         total_with_vat = subtotal + vat
 
         col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+        col_t1.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.0f} EGP")
 
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Furniture Quotation Builder")
@@ -1228,7 +1250,7 @@ if df_fact is not None and not df_fact.empty:
                     "Option": option_label,
                     "QTY": quantity,
                     "Rate (EGP)": rate,
-                    "Total (EGP)": quantity * rate,
+                    "Total (EGP)": round_egp(quantity * rate),
                 })
                 selected_room_items.append({
                     "Level": level_name,
@@ -1274,7 +1296,7 @@ if df_fact is not None and not df_fact.empty:
                     ),
                     "Total (EGP)": st.column_config.NumberColumn(
                         "Total (EGP)",
-                        format="%.2f",
+                        format="%.0f",
                         disabled=True,
                     ),
                 },
@@ -1574,7 +1596,7 @@ if df_fact is not None and not df_fact.empty:
                         item["No."] = (
                             len(st.session_state.staged_items) + 1
                         )
-                        item["Total Amount"] = (
+                        item["Total Amount"] = round_egp(
                             float(item["QTY"]) * float(item["Rate"])
                         )
                         st.session_state.staged_items.append(item)
@@ -1653,7 +1675,7 @@ if df_fact is not None and not df_fact.empty:
                     ),
                     "Total Amount": st.column_config.NumberColumn(
                         "Total Amount",
-                        format="%.2f",
+                        format="%.0f",
                         disabled=True,
                     ),
                 },
@@ -1687,23 +1709,25 @@ if df_fact is not None and not df_fact.empty:
                 item["No."] = len(updated_items) + 1
                 item["QTY"] = float(item.get("QTY", 1.0))
                 item["Rate"] = float(item.get("Rate", 0.0))
-                item["Total Amount"] = item["QTY"] * item["Rate"]
+                item["Total Amount"] = round_egp(
+                    item["QTY"] * item["Rate"]
+                )
                 updated_items.append(item)
             if updated_items != st.session_state.staged_items:
                 st.session_state.staged_items = updated_items
                 st.rerun()
 
-            subtotal = sum(
+            subtotal = round_egp(sum(
                 float(item["Total Amount"])
                 for item in st.session_state.staged_items
-            )
-            vat = subtotal * 0.14
+            ))
+            vat = round_egp(subtotal * 0.14)
             total_with_vat = subtotal + vat
             total_col1, total_col2 = st.columns(2)
-            total_col1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+            total_col1.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
             total_col2.metric(
                 "Total with 14% VAT (EGP)",
-                f"{total_with_vat:,.2f} EGP",
+                f"{total_with_vat:,.0f} EGP",
             )
 
             if st.button(
@@ -1750,7 +1774,9 @@ if df_fact is not None and not df_fact.empty:
         except: 
             base_rate = 0.0
             
-        calculated_line_item_total = (base_rate * cdh_qty) + 50000.0
+        calculated_line_item_total = round_egp(
+            (base_rate * cdh_qty) + 50000.0
+        )
         
         # Format the quantity to remove decimals if it's a whole number for the description
         formatted_qty = int(cdh_qty) if cdh_qty.is_integer() else cdh_qty
@@ -1776,13 +1802,13 @@ if df_fact is not None and not df_fact.empty:
         summary_df = pd.DataFrame([{k: v for k, v in st.session_state.staged_items[0].items() if k not in ['Financing Options', 'Lookup Name']}])
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
         
-        subtotal = calculated_line_item_total
-        vat = subtotal * 0.14
+        subtotal = round_egp(calculated_line_item_total)
+        vat = round_egp(subtotal * 0.14)
         total_with_vat = subtotal + vat
 
         col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+        col_t1.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
+        col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.0f} EGP")
 
     elif selected_request_type == "A.C":
         st.markdown("### ❄️ A.C Quotation Builder")
@@ -2019,12 +2045,12 @@ if df_fact is not None and not df_fact.empty:
         preview_columns = st.columns(4)
         preview_columns[0].metric(
             "A.C Units",
-            f"{equipment_preview_total:,.2f} EGP",
+            f"{round_egp(equipment_preview_total):,.0f} EGP",
         )
         preview_columns[1].metric(
             "Freon Piping",
             (
-                f"{piping_preview_total:,.2f} EGP"
+                f"{round_egp(piping_preview_total):,.0f} EGP"
                 if include_ac_freon
                 else "Not included"
             ),
@@ -2032,14 +2058,14 @@ if df_fact is not None and not df_fact.empty:
         preview_columns[2].metric(
             "Concealed Extras",
             (
-                f"{concealed_preview_total:,.2f} EGP"
+                f"{round_egp(concealed_preview_total):,.0f} EGP"
                 if ac_installation == "Concealed"
                 else "Not required"
             ),
         )
         preview_columns[3].metric(
             "Configuration Total",
-            f"{configuration_preview_total:,.2f} EGP",
+            f"{round_egp(configuration_preview_total):,.0f} EGP",
         )
 
         selected_configuration_key = ac_configuration_key(
@@ -2166,15 +2192,15 @@ if df_fact is not None and not df_fact.empty:
                     ),
                     "Total Amount": st.column_config.NumberColumn(
                         "Total Amount (EGP)",
-                        format="%.2f",
+                        format="%.0f",
                     ),
                 },
             )
 
-            ac_subtotal = sum(
+            ac_subtotal = round_egp(sum(
                 float(item["Total Amount"])
                 for item in ac_internal_items
-            )
+            ))
             st.session_state.ac_detailed_scope_items = (
                 build_ac_detailed_scope_rows(
                     st.session_state.ac_configurations,
@@ -2203,16 +2229,16 @@ if df_fact is not None and not df_fact.empty:
                 "A separate priced breakdown file is mandatory and will also "
                 "be generated."
             )
-            ac_vat = ac_subtotal * 0.14
+            ac_vat = round_egp(ac_subtotal * 0.14)
             ac_total_with_vat = ac_subtotal + ac_vat
             total_columns = st.columns(2)
             total_columns[0].metric(
                 "Total (EGP)",
-                f"{ac_subtotal:,.2f} EGP",
+                f"{ac_subtotal:,.0f} EGP",
             )
             total_columns[1].metric(
                 "Total with 14% VAT (EGP)",
-                f"{ac_total_with_vat:,.2f} EGP",
+                f"{ac_total_with_vat:,.0f} EGP",
             )
 
             if st.button(
@@ -2320,7 +2346,7 @@ if df_fact is not None and not df_fact.empty:
             st.stop()
 
         glass_house_scope_rows = glass_house_option["Scope Rows"]
-        glass_house_subtotal = float(glass_house_option["Subtotal"])
+        glass_house_subtotal = round_egp(glass_house_option["Subtotal"])
         glass_house_option_label = f"Option {glass_house_option_number}"
         glass_house_option_description = (
             "Three-layer 6 mm glass ceiling"
@@ -2370,7 +2396,7 @@ if df_fact is not None and not df_fact.empty:
                 ),
                 "Total (EGP)": st.column_config.NumberColumn(
                     "Total (EGP)",
-                    format="%.2f",
+                    format="%.0f",
                 ),
             },
         )
@@ -2381,16 +2407,16 @@ if df_fact is not None and not df_fact.empty:
             f"{'priced' if attach_priced_glass_house_scope else 'unpriced'}."
         )
 
-        glass_house_vat = glass_house_subtotal * 0.14
+        glass_house_vat = round_egp(glass_house_subtotal * 0.14)
         glass_house_total_with_vat = glass_house_subtotal + glass_house_vat
         total_columns = st.columns(2)
         total_columns[0].metric(
             "Total (EGP)",
-            f"{glass_house_subtotal:,.2f} EGP",
+            f"{glass_house_subtotal:,.0f} EGP",
         )
         total_columns[1].metric(
             "Total with 14% VAT (EGP)",
-            f"{glass_house_total_with_vat:,.2f} EGP",
+            f"{glass_house_total_with_vat:,.0f} EGP",
         )
 
     else:
@@ -2670,7 +2696,7 @@ if df_fact is not None and not df_fact.empty:
 
                     row_cols[4].markdown(unit)
                     row_cols[5].markdown(f"{rate:,.2f}")
-                    row_cols[6].markdown(f"**{total:,.2f}**")
+                    row_cols[6].markdown(f"**{round_egp(total):,.0f}**")
                     row_cols[7].button(
                         "🗑️",
                         key=f"delete_pergola_{row_id}",
@@ -2694,7 +2720,7 @@ if df_fact is not None and not df_fact.empty:
                         'Unit': unit,
                         'QTY': boq_qty,
                         'Rate': rate,
-                        'Total Amount': total,
+                        'Total Amount': round_egp(total),
                         'prev_Type': current_type
                     })
 
@@ -2712,14 +2738,14 @@ if df_fact is not None and not df_fact.empty:
                 ])
                 st.session_state.staged_items = final_df.to_dict('records')
 
-                subtotal = float(final_df['Total Amount'].sum()) if not final_df.empty else 0.0
-                vat = subtotal * 0.14
+                subtotal = round_egp(final_df['Total Amount'].sum()) if not final_df.empty else 0
+                vat = round_egp(subtotal * 0.14)
                 total_with_vat = subtotal + vat
 
                 st.markdown("---")
                 total_col, vat_col = st.columns(2)
-                total_col.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-                vat_col.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+                total_col.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
+                vat_col.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.0f} EGP")
 
             render_pergola_editor()
             summary_df = pd.DataFrame(st.session_state.get('staged_items', []))
@@ -2773,7 +2799,9 @@ if df_fact is not None and not df_fact.empty:
             final_df = edited_df.copy()
             final_df['QTY'] = pd.to_numeric(final_df['QTY'], errors='coerce').fillna(0.0)
             final_df['Rate'] = pd.to_numeric(final_df['Rate'], errors='coerce').fillna(0.0)
-            final_df['Total Amount'] = final_df['QTY'] * final_df['Rate']
+            final_df['Total Amount'] = (
+                final_df['QTY'] * final_df['Rate']
+            ).apply(round_egp)
             final_df.insert(0, 'No.', range(1, len(final_df) + 1))
             st.session_state.custom_boq_data = edited_df
 
@@ -2786,23 +2814,23 @@ if df_fact is not None and not df_fact.empty:
                     hide_index=True,
                     use_container_width=True,
                     column_config={
-                        "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.2f EGP")
+                        "Total Amount": st.column_config.NumberColumn("Total Amount", format="%.0f EGP")
                     }
                 )
 
             st.session_state.staged_items = final_df.to_dict('records')
             summary_df = final_df
 
-            subtotal = final_df['Total Amount'].sum()
-            vat = subtotal * 0.14
+            subtotal = round_egp(final_df['Total Amount'].sum())
+            vat = round_egp(subtotal * 0.14)
             total_with_vat = subtotal + vat
 
             col_t1, col_t2 = st.columns(2)
             if selected_request_type == "Land Extension":
-                col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
+                col_t1.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
             else:
-                col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
-                col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+                col_t1.metric("Total (EGP)", f"{subtotal:,.0f} EGP")
+                col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.0f} EGP")
 
     # --- SECTION 3B: QUOTATION-SPECIFIC TERMS & DURATION ---
     if st.session_state.staged_items:
@@ -3252,20 +3280,27 @@ if df_fact is not None and not df_fact.empty:
                         align="C",
                     )
                     pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
-                    pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
+                    pdf.cell(
+                        30,
+                        8,
+                        f"{round_egp(item_row.get('Total Amount', 0)):,.0f}",
+                        border=1,
+                        align="R",
+                        ln=True,
+                    )
                     
                 pdf.ln(6)
                 pdf.set_font("Helvetica", "B", 11)
                 
-                subtotal = summary_df['Total Amount'].sum()
-                vat = subtotal * 0.14
+                subtotal = round_egp(summary_df['Total Amount'].sum())
+                vat = round_egp(subtotal * 0.14)
                 total_with_vat = subtotal + vat
                 
                 if selected_request_type == "Land Extension":
-                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
+                    pdf.cell(0, 8, f"Total Value: {subtotal:,.0f} EGP", ln=True)
                 else:
-                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
-                    pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
+                    pdf.cell(0, 8, f"Total Value: {subtotal:,.0f} EGP", ln=True)
+                    pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.0f} EGP", ln=True)
                 pdf.ln(4)
                 
                 final_terms_text = st.session_state.get(
