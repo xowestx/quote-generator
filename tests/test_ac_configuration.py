@@ -1,5 +1,6 @@
 import ast
 import unittest
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 
@@ -48,6 +49,7 @@ class ACConfigurationTests(unittest.TestCase):
             or (
                 isinstance(node, ast.FunctionDef)
                 and node.name in {
+                    "round_egp",
                     "ac_configuration_key",
                     "ac_catalog_options",
                     "build_ac_line_items",
@@ -55,7 +57,10 @@ class ACConfigurationTests(unittest.TestCase):
                 }
             )
         ]
-        namespace = {}
+        namespace = {
+            "Decimal": Decimal,
+            "ROUND_HALF_UP": ROUND_HALF_UP,
+        }
         exec(
             compile(
                 ast.Module(body=calculation_nodes, type_ignores=[]),
@@ -180,6 +185,8 @@ class ACConfigurationTests(unittest.TestCase):
         self.assertEqual(lines[0]["QTY"], 2.0)
         self.assertEqual(lines[1]["QTY"], 24.0)
         self.assertEqual(lines[1]["Rate"], 1176.4)
+        self.assertEqual(lines[0]["Total Amount"], 51529)
+        self.assertEqual(lines[1]["Total Amount"], 28234)
 
     def test_freon_can_be_excluded_from_cost_and_scope(self):
         configuration = {
@@ -252,6 +259,9 @@ class ACConfigurationTests(unittest.TestCase):
         self.assertEqual(lines[2]["Rate"], 10588.2)
         self.assertEqual(lines[3]["QTY"], 10.0)
         self.assertEqual(lines[3]["Rate"], 2353.0)
+        self.assertTrue(
+            all(isinstance(line["Total Amount"], int) for line in lines)
+        )
 
     def test_duplicate_equipment_combination_is_blocked(self):
         self.assertIn('"Room / Location"', self.ac_section)
@@ -435,11 +445,11 @@ class ACConfigurationTests(unittest.TestCase):
             1,
         )[0]
         self.assertIn(
-            'includePrices ? formatAcScopeAmount(item["Rate"]) : ""',
+            'includePrices ? formatWholeEgp(item["Rate"]) : ""',
             helper,
         )
         self.assertIn(
-            'includePrices ? formatAcScopeAmount(item["Total (EGP)"]) : ""',
+            'includePrices ? formatWholeEgp(item["Total (EGP)"]) : ""',
             helper,
         )
         self.assertIn("function createPricedBreakdown(", self.script_source)
