@@ -405,7 +405,7 @@ function generateQuoteForRow(sheet, rowIndex, rowData, urlColIndex, idColIndex) 
         unit: unit,
         qty: qty,
         rate: Number(rate),
-        total: roundEgp((Number(qty) || 0) * (Number(rate) || 0))
+        total: (Number(qty) || 0) * (Number(rate) || 0)
       });
     }
   }
@@ -422,7 +422,6 @@ function generateQuoteForRow(sheet, rowIndex, rowData, urlColIndex, idColIndex) 
 
   let subTotal = 0;
   items.forEach(item => { subTotal += item.total; });
-  subTotal = roundEgp(subTotal);
 
   const reqTypeStr = formData.requestType ? formData.requestType.toString().toUpperCase().trim() : "";
   const isLandExtension = reqTypeStr.includes("LAND EXTENSION");
@@ -431,10 +430,12 @@ function generateQuoteForRow(sheet, rowIndex, rowData, urlColIndex, idColIndex) 
   const isBedroomPackage = /^\d+\s+BEDROOM/.test(reqTypeStr);
 
   const vatRate = isLandExtension ? 0.0 : 0.14;
-  const vatAmount = roundEgp(subTotal * vatRate);
+  const vatAmount = subTotal * vatRate;
   const grandTotal = subTotal + vatAmount;
 
-  const moneyWords = `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & Zero Piaster`;
+  const moneyWords = isLandExtension 
+    ? `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & Zero Piaster`
+    : `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & ${Math.round((grandTotal - Math.floor(grandTotal)) * 100)}/100 Piaster`;
 
   // Dynamic Template & Folder Selection
   let templateId = CONFIG.TEMPLATE_ID;
@@ -458,9 +459,9 @@ function generateQuoteForRow(sheet, rowIndex, rowData, urlColIndex, idColIndex) 
   body.replaceText("{{date}}", formattedDate);
   body.replaceText("{{number}}", serialNumber);
   
-  body.replaceText("{{subtotal}}", formatWholeEgp(subTotal));
-  body.replaceText("{{vat}}", formatWholeEgp(vatAmount));
-  body.replaceText("{{total}}", formatWholeEgp(grandTotal));
+  body.replaceText("{{subtotal}}", Number(subTotal).toLocaleString('en-US', {minimumFractionDigits: 2}));
+  body.replaceText("{{vat}}", Number(vatAmount).toLocaleString('en-US', {minimumFractionDigits: 2}));
+  body.replaceText("{{total}}", Number(grandTotal).toLocaleString('en-US', {minimumFractionDigits: 2}));
   body.replaceText("{{word}}", moneyWords);
 
   const termsRange = body.findText("{{terms}}");
@@ -499,7 +500,7 @@ function generateQuoteForRow(sheet, rowIndex, rowData, urlColIndex, idColIndex) 
         String(item.unit),
         String(item.qty),
         Number(item.rate).toLocaleString('en-US', {minimumFractionDigits: 2}),
-        formatWholeEgp(item.total)
+        Number(item.total).toLocaleString('en-US', {minimumFractionDigits: 2})
       ]);
       
       const table = body.insertTable(index, tableHeader.concat(tableRows));
@@ -651,17 +652,6 @@ function convertNumberToWords(amount) {
   return convertInteger(Math.floor(amount)) || "Zero";
 }
 
-function roundEgp(value) {
-  return Math.round(Number(value) || 0);
-}
-
-function formatWholeEgp(value) {
-  return roundEgp(value).toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  });
-}
-
 // ==========================================
 // 6. WEBHOOK LISTENER (FOR STREAMLIT UI)
 // ==========================================
@@ -709,7 +699,7 @@ function appendAcDetailedScope(
       String(item["Unit"] || ""),
       item["QTY"] === "" || item["QTY"] == null ? "" : String(item["QTY"]),
       includePrices ? formatAcScopeAmount(item["Rate"]) : "",
-      includePrices ? formatWholeEgp(item["Total (EGP)"]) : ""
+      includePrices ? formatAcScopeAmount(item["Total (EGP)"]) : ""
     ]);
   });
 
@@ -893,7 +883,7 @@ function doPost(e) {
       qty: item.qty,
       rate: item.rate,
       baseKey: item.baseKey || "",
-      total: roundEgp((Number(item.qty) || 0) * (Number(item.rate) || 0))
+      total: (Number(item.qty) || 0) * (Number(item.rate) || 0)
     }));
 
     // --- SPECIAL CONDITION: LAND EXTENSION ---
@@ -936,14 +926,14 @@ function doPost(e) {
         formattedItems[0].unit = "M2";
         formattedItems[0].qty = area;
         formattedItems[0].rate = selectedLandExtensionRate;
-        formattedItems[0].total = roundEgp(area * selectedLandExtensionRate);
+        formattedItems[0].total = area * selectedLandExtensionRate;
       } else {
         formattedItems.push({
           description: "Required Fees for Adding land extension area of for a/m unit as per attached Drawings.",
           unit: "M2",
           qty: area,
           rate: selectedLandExtensionRate,
-          total: roundEgp(area * selectedLandExtensionRate)
+          total: area * selectedLandExtensionRate
         });
       }
     }
@@ -957,13 +947,14 @@ function doPost(e) {
     
     let subTotal = 0;
     formattedItems.forEach(item => { subTotal += item.total; });
-    subTotal = roundEgp(subTotal);
     
     const vatRate = isLandExtension ? 0.0 : 0.14;
-    const vatAmount = roundEgp(subTotal * vatRate);
+    const vatAmount = subTotal * vatRate;
     const grandTotal = subTotal + vatAmount;
-
-    const moneyWords = `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & Zero Piaster`;
+    
+    const moneyWords = isLandExtension 
+      ? `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & Zero Piaster`
+      : `Only ${convertNumberToWords(grandTotal)} Egyptian Pound & ${Math.round((grandTotal - Math.floor(grandTotal)) * 100)}/100 Piaster`;
     
     // Dynamic Template Selection
     let templateId = CONFIG.TEMPLATE_ID;
@@ -984,9 +975,9 @@ function doPost(e) {
     body.replaceText("{{request}}", payload.requestType || "");
     body.replaceText("{{date}}", formattedDate);
     body.replaceText("{{number}}", serialNumber);
-    body.replaceText("{{subtotal}}", formatWholeEgp(subTotal));
-    body.replaceText("{{vat}}", formatWholeEgp(vatAmount));
-    body.replaceText("{{total}}", formatWholeEgp(grandTotal));
+    body.replaceText("{{subtotal}}", Number(subTotal).toLocaleString('en-US', {minimumFractionDigits: 2}));
+    body.replaceText("{{vat}}", Number(vatAmount).toLocaleString('en-US', {minimumFractionDigits: 2}));
+    body.replaceText("{{total}}", Number(grandTotal).toLocaleString('en-US', {minimumFractionDigits: 2}));
     body.replaceText("{{word}}", moneyWords);
 
     // Streamlit-generated terms are authoritative for this quotation.
@@ -1028,7 +1019,7 @@ function doPost(e) {
         String(item.unit),
         String(item.qty),
         Number(item.rate).toLocaleString('en-US', {minimumFractionDigits: 2}),
-        formatWholeEgp(item.total)
+        Number(item.total).toLocaleString('en-US', {minimumFractionDigits: 2})
       ]);
       
       const table = body.insertTable(index, tableHeader.concat(tableRows));
