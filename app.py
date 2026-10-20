@@ -2829,6 +2829,15 @@ if df_fact is not None and not df_fact.empty:
             else ""
         )
 
+        interior_package_duration_months = (
+            8
+            if selected_request_type in {
+                "Interior Standard Package",
+                "Interior Customized Package",
+            }
+            else None
+        )
+
         terms_context_key = f"{selected_unit}|{terms_lookup_name}"
         if st.session_state.get("terms_context_key") != terms_context_key:
             defaults, extraction_warnings = parse_terms_defaults(default_terms_text)
@@ -2849,11 +2858,19 @@ if df_fact is not None and not df_fact.empty:
                     else "Pre-Construction"
                 )
             )
-            st.session_state.qt_master_duration_months = defaults.duration_months
-            st.session_state.qt_duration_months = (
-                6
-                if st.session_state.qt_delivery_stage == "Pre-Construction"
+            st.session_state.qt_master_duration_months = (
+                interior_package_duration_months
+                if interior_package_duration_months is not None
                 else defaults.duration_months
+            )
+            st.session_state.qt_duration_months = (
+                interior_package_duration_months
+                if interior_package_duration_months is not None
+                else (
+                    6
+                    if st.session_state.qt_delivery_stage == "Pre-Construction"
+                    else defaults.duration_months
+                )
             )
             st.session_state.qt_last_delivery_stage = st.session_state.qt_delivery_stage
             st.session_state.qt_payment_method = defaults.payment_method
@@ -2916,11 +2933,15 @@ if df_fact is not None and not df_fact.empty:
         current_delivery_stage = st.session_state.qt_delivery_stage
         if st.session_state.get("qt_last_delivery_stage") != current_delivery_stage:
             st.session_state.qt_duration_months = (
-                6
-                if current_delivery_stage == "Pre-Construction"
+                interior_package_duration_months
+                if interior_package_duration_months is not None
                 else (
-                    5 if roof_room_terms_locked
-                    else st.session_state.get("qt_master_duration_months", 0)
+                    6
+                    if current_delivery_stage == "Pre-Construction"
+                    else (
+                        5 if roof_room_terms_locked
+                        else st.session_state.get("qt_master_duration_months", 0)
+                    )
                 )
             )
             st.session_state.qt_last_delivery_stage = current_delivery_stage
