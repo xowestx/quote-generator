@@ -2835,7 +2835,7 @@ if df_fact is not None and not df_fact.empty:
             st.session_state.terms_context_key = terms_context_key
             normalized_unit_id = str(selected_unit or "").strip().upper()
             is_hv1_or_hv2_unit = bool(
-                re.search(r"(?:^|[/\\_-])HV[12](?:$|[/\\_-]|\\d)", normalized_unit_id)
+                re.search(r"(?:^|[-/_])HV[12](?:$|[-/_]|\d)", normalized_unit_id)
             )
             st.session_state.qt_delivery_stage = (
                 "Post-Delivery"
