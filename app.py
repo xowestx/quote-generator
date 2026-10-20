@@ -2833,11 +2833,21 @@ if df_fact is not None and not df_fact.empty:
         if st.session_state.get("terms_context_key") != terms_context_key:
             defaults, extraction_warnings = parse_terms_defaults(default_terms_text)
             st.session_state.terms_context_key = terms_context_key
-            normalized_unit_id = str(selected_unit or "").upper()
+            normalized_unit_id = str(selected_unit or "").strip().upper()
+            is_hv1_or_hv2_unit = bool(
+                re.search(r"(?:^|[/\\_-])HV[12](?:$|[/\\_-]|\\d)", normalized_unit_id)
+            )
             st.session_state.qt_delivery_stage = (
-                defaults.delivery_stage
-                if any(code in normalized_unit_id for code in ("RV", "RA", "QA"))
-                else "Pre-Construction"
+                "Post-Delivery"
+                if is_hv1_or_hv2_unit
+                else (
+                    defaults.delivery_stage
+                    if any(
+                        code in normalized_unit_id
+                        for code in ("RV", "RA", "QA")
+                    )
+                    else "Pre-Construction"
+                )
             )
             st.session_state.qt_master_duration_months = defaults.duration_months
             st.session_state.qt_duration_months = (
