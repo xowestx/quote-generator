@@ -887,7 +887,7 @@ if df_fact is not None and not df_fact.empty:
     request_options = [
         "Roof Room", "Pool Standard", "Pool Customized", "Interior Standard Package", 
         "Interior Customized Package", "Interior Modification", "Kitchen", "Closets", 
-        "Landscape", "Furniture", "Closing Double Height", "Land Extension", 
+        "Landscape", "Furniture", "Furniture (Bulk Units)", "Closing Double Height", "Land Extension", 
         "Exterior Painting", "Glass House", "Elevator", "A.C", "Shutters", 
         "Fence & Gates", "Pergola", "Landscape Modifications", "SOG", "Closing Elevator Shaft"
     ]
@@ -1066,6 +1066,347 @@ if df_fact is not None and not df_fact.empty:
         col_t1, col_t2 = st.columns(2)
         col_t1.metric("Total (EGP)", f"{subtotal:,.2f} EGP")
         col_t2.metric("Total with 14% VAT (EGP)", f"{total_with_vat:,.2f} EGP")
+
+    elif selected_request_type == "Furniture (Bulk Units)":
+        st.markdown("### 🛋️ Bulk Furniture Quotations")
+        st.caption(
+            "Generate separate Rent and Luxury quotations for multiple units. "
+            "Bedroom quantities are read from FACT automatically."
+        )
+
+        default_bulk_units = [
+            unit for unit in [
+                "OW/RA1-1-0-1", "OW/RA1-1-0-2", "OW/RA1-1-1-3",
+                "OW/RA1-1-2-4", "OW/RA1-1-2-5", "OW/RA1-1-3-6",
+                "OW/RA1-1-3-7", "OW/RA1-1-4-8", "OW/RA1-1-4-9",
+                "OW/RA2-27-3-6", "OW/RA3-45-4-25", "OW/RA3-45-5-30",
+                "OW/RA4-47-5-30", "OW/RA4-56-0-2", "OW/RA4-56-2-4",
+            ]
+            if unit in valid_units
+        ]
+        bulk_units = st.multiselect(
+            "Unit IDs",
+            valid_units,
+            default=default_bulk_units,
+            key="bulk_furniture_units_v1",
+        )
+        include_bulk_freon = st.checkbox(
+            "Include Freon piping for all AC units",
+            value=False,
+            help=(
+                "Normally unchecked. When enabled, enter the required piping "
+                "length per AC unit."
+            ),
+        )
+        bulk_freon_meters = st.number_input(
+            "Freon piping metres per AC unit",
+            min_value=10.0,
+            max_value=15.0,
+            value=10.0,
+            step=1.0,
+            disabled=not include_bulk_freon,
+        )
+
+        def batch_fact_row(unit_id):
+            target = fuzzy_clean(unit_id)
+            rows = df_fact[
+                df_fact[fact_unit_id_col].apply(fuzzy_clean) == target
+            ]
+            return None if rows.empty else rows.iloc[0]
+
+        def batch_bedrooms(record):
+            if record is None:
+                return 0
+            raw_value = record.get(
+                "No. Of Bedrooms",
+                record.get("Bedrooms", record.get("No. of Bedrooms", 0)),
+            )
+            try:
+                return max(int(float(raw_value)), 0)
+            except (TypeError, ValueError):
+                match = re.search(r"\\d+", str(raw_value))
+                return int(match.group()) if match else 0
+
+        def batch_client(unit_id):
+            if (
+                df_clients is None or df_clients.empty
+                or c_unit_col is None or c_name_col is None
+            ):
+                return "Unassigned"
+            target = fuzzy_clean(unit_id)
+            rows = df_clients[
+                df_clients[c_unit_col].apply(fuzzy_clean) == target
+            ]
+            if rows.empty:
+                return "Unassigned"
+            name = str(rows.iloc[0][c_name_col]).strip()
+            return name if name.upper() not in {
+                "", "NAN", "NONE", "NULL", "0", "0.0"
+            } else "Unassigned"
+
+        batch_levels = {
+            "Rent": {
+                "label": "Rent [R]",
+                "multiplier": 0.35,
+                "kitchen_rate": 185750.00,
+                "rooms": {
+                    "Reception": "RECEPTION - P3",
+                    "Dining Room": "DINING ROOM - P2",
+                    "Master Bedroom": "MASTER BEDROOM - P2",
+                    "Kids Bedroom": "KIDS BEDROOM - P2",
+                    "Terrace": "TERRACE - P3",
+                },
+                "ac_brand": "Fresh",
+                "bedroom_ac_rate": round(18500.00 / AC_DRY_COST_FACTOR, 2),
+                "reception_ac_rate": round(36000.00 / AC_DRY_COST_FACTOR, 2),
+            },
+            "Luxury": {
+                "label": "Luxury [L]",
+                "multiplier": 1.0,
+                "kitchen_rate": 354350.00,
+                "rooms": {
+                    "Reception": "RECEPTION - P1",
+                    "Dining Room": "DINING ROOM - P2",
+                    "Master Bedroom": "MASTER BEDROOM - P1",
+                    "Kids Bedroom": "KIDS BEDROOM - P1",
+                    "Terrace": "TERRACE - P1",
+                },
+                "ac_brand": "Carrier",
+                "bedroom_ac_rate": 38772.20,
+                "reception_ac_rate": 60694.40,
+            },
+        }
+
+        def batch_items(level_name, bedroom_count):
+            setup = batch_levels[level_name]
+            room_quantities = [
+                ("Reception", 1.0), ("Dining Room", 1.0),
+                ("Terrace", 1.0), ("Master Bedroom", 1.0),
+            ]
+            if bedroom_count > 1:
+                room_quantities.append(
+                    ("Kids Bedroom", float(bedroom_count - 1))
+                )
+
+            items = []
+            for room_name, quantity in room_quantities:
+                rate_key = setup["rooms"][room_name]
+                rate = (
+                    float(FURNITURE_RATES[rate_key])
+                    * float(setup["multiplier"])
+                )
+                option = rate_key.replace(" - ", " ")
+                items.append({
+                    "description": (
+                        f"Supply and install Furniture for {room_name}, {option}, "
+                        "including Curtains, rugs, cushions, bed linens, table "
+                        "lamps, pendant lights, and mattresses."
+                    ),
+                    "unit": "LS", "qty": quantity, "rate": rate,
+                })
+
+            items.append({
+                "description": (
+                    f"Supply and install kitchen with {level_name} finish as per "
+                    "approved sample and selected design."
+                ),
+                "unit": "LS", "qty": 1.0,
+                "rate": float(setup["kitchen_rate"]),
+            })
+            ac_specs = [
+                ("Reception", "3", 1.0, setup["reception_ac_rate"]),
+                ("Bedrooms", "1.5", float(bedroom_count), setup["bedroom_ac_rate"]),
+            ]
+            for room_name, hp, quantity, equipment_rate in ac_specs:
+                items.append({
+                    "description": (
+                        f"Supply and install {hp} HP {setup['ac_brand']} Normal "
+                        f"Split Cold-Only AC unit for {room_name}."
+                    ),
+                    "unit": "NO.", "qty": quantity,
+                    "rate": float(equipment_rate),
+                })
+                if include_bulk_freon:
+                    items.append({
+                        "description": (
+                            f"Supply and install refrigerant piping for "
+                            f"{setup['ac_brand']} {hp} HP AC units serving "
+                            f"{room_name}."
+                        ),
+                        "unit": "M",
+                        "qty": quantity * float(bulk_freon_meters),
+                        "rate": AC_FREON_PIPE_RATE,
+                    })
+            return items
+
+        preview_rows = []
+        batch_errors = []
+        for unit_id in bulk_units:
+            record = batch_fact_row(unit_id)
+            bedrooms_count = batch_bedrooms(record)
+            if record is None:
+                batch_errors.append(f"{unit_id}: not found in FACT.")
+                continue
+            if bedrooms_count < 1:
+                batch_errors.append(
+                    f"{unit_id}: bedroom count is missing in FACT."
+                )
+                continue
+            for level_name in ("Rent", "Luxury"):
+                items = batch_items(level_name, bedrooms_count)
+                preview_rows.append({
+                    "Unit ID": unit_id,
+                    "Client": batch_client(unit_id),
+                    "Bedrooms": bedrooms_count,
+                    "Option": level_name,
+                    "Kitchen": 1,
+                    "Bedroom AC 1.5 HP": bedrooms_count,
+                    "Reception AC 3 HP": 1,
+                    "AC Brand": batch_levels[level_name]["ac_brand"],
+                    "Freon": (
+                        f"{bulk_freon_meters:g} m/unit"
+                        if include_bulk_freon else "Excluded"
+                    ),
+                    "Net Total (EGP)": sum(
+                        float(item["qty"]) * float(item["rate"])
+                        for item in items
+                    ),
+                })
+
+        if preview_rows:
+            st.dataframe(
+                pd.DataFrame(preview_rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Net Total (EGP)": st.column_config.NumberColumn(
+                        "Net Total (EGP)", format="%.2f"
+                    ),
+                },
+            )
+        for error_message in batch_errors:
+            st.error(error_message)
+
+        confirm_batch = st.checkbox(
+            "I reviewed the units, quantities, brands and totals above.",
+            value=False,
+        )
+        if st.button(
+            "🌐 Generate 2 Official Quotations per Unit",
+            type="primary",
+            use_container_width=True,
+            disabled=(
+                not bulk_units or bool(batch_errors) or not confirm_batch
+            ),
+        ):
+            terms_col = df_terms.columns[0]
+            text_col = (
+                df_terms.columns[1]
+                if len(df_terms.columns) > 1 else df_terms.columns[0]
+            )
+            matches = df_terms[
+                df_terms[terms_col].astype(str).str.strip().str.upper()
+                == "FURNITURE"
+            ]
+            if matches.empty:
+                st.error("Furniture master Terms & Conditions are missing.")
+            else:
+                master_terms = str(matches.iloc[0][text_col])
+                defaults, _ = parse_terms_defaults(master_terms)
+                results = []
+                total_docs = len(bulk_units) * 2
+                progress = st.progress(0)
+                counter = 0
+
+                for unit_id in bulk_units:
+                    record = batch_fact_row(unit_id)
+                    bedrooms_count = batch_bedrooms(record)
+                    normalized_id = str(unit_id).strip().upper()
+                    stage = (
+                        defaults.delivery_stage
+                        if any(code in normalized_id for code in ("RV", "RA", "QA"))
+                        else "Pre-Construction"
+                    )
+                    duration = (
+                        6 if stage == "Pre-Construction"
+                        else defaults.duration_months
+                    )
+                    terms_text, terms_data = generate_terms(
+                        master_terms,
+                        delivery_stage=stage,
+                        duration_months=int(duration),
+                        payment_method=defaults.payment_method,
+                        custom_payment_method=defaults.custom_payment_method,
+                        down_payment_percent=float(defaults.down_payment_percent),
+                        due_event=defaults.due_event,
+                        custom_due_event=defaults.custom_due_event,
+                        payment_term_months=int(defaults.payment_term_months),
+                        installment_frequency=defaults.installment_frequency,
+                        offer_validity_days=int(defaults.offer_validity_days),
+                    )
+                    zone = str(record.get("Zone", "Unknown Zone"))
+                    bedroom_label = (
+                        "1 Bedroom" if bedrooms_count == 1
+                        else f"{bedrooms_count} Bedrooms"
+                    )
+
+                    for level_name in ("Rent", "Luxury"):
+                        setup = batch_levels[level_name]
+                        payload = {
+                            "action": "standard",
+                            "unitId": unit_id,
+                            "clientName": batch_client(unit_id),
+                            "zone": zone,
+                            "requestType": (
+                                f"{bedroom_label}, {setup['label']}"
+                            ),
+                            "requestCategory": "Furniture",
+                            "generatedTermsAndConditions": terms_text,
+                            "quotationTermsOverrides": terms_data,
+                            "items": batch_items(level_name, bedrooms_count),
+                        }
+                        try:
+                            response = requests.post(
+                                WEBHOOK_URL,
+                                data=json.dumps(payload),
+                                headers={"Content-Type": "application/json"},
+                                timeout=120,
+                            )
+                            response.raise_for_status()
+                            data = response.json()
+                            success = data.get("status") == "success"
+                            results.append({
+                                "Unit ID": unit_id,
+                                "Option": level_name,
+                                "Status": (
+                                    "Generated" if success
+                                    else "Failed: " + str(data.get("message", ""))
+                                ),
+                                "Google Doc": data.get("docUrl", "") if success else "",
+                                "PDF": data.get("pdfUrl", "") if success else "",
+                            })
+                        except Exception as error:
+                            results.append({
+                                "Unit ID": unit_id, "Option": level_name,
+                                "Status": f"Failed: {error}",
+                                "Google Doc": "", "PDF": "",
+                            })
+                        counter += 1
+                        progress.progress(counter / total_docs)
+
+                st.session_state.bulk_furniture_results = results
+
+        if st.session_state.get("bulk_furniture_results"):
+            st.markdown("##### Generated Quotations")
+            st.dataframe(
+                pd.DataFrame(st.session_state.bulk_furniture_results),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Google Doc": st.column_config.LinkColumn("Google Doc"),
+                    "PDF": st.column_config.LinkColumn("PDF"),
+                },
+            )
 
     elif selected_request_type == "Furniture":
         st.markdown("### 🛋️ Furniture Quotation Builder")
