@@ -4,11 +4,15 @@ import streamlit as st
 st.title("ClickUp connection test")
 
 headers = {"Authorization": st.secrets["CLICKUP_TOKEN"]}
-list_id = st.secrets["CLICKUP_LIST_ID"]
 
+# Search all tasks in workspace with specific criteria
 r = requests.get(
-    f"https://api.clickup.com/api/v2/list/{list_id}/task",
+    "https://api.clickup.com/api/v2/team/90152601622/task",
     headers=headers,
+    params={
+        "list_ids": ["901525752306"],
+        "page": 0,
+    },
 )
 
 if r.status_code == 200:
