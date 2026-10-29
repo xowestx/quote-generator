@@ -30,3 +30,20 @@ Streamlit application.
 New Streamlit quotations send `generatedTermsAndConditions`. Existing Google
 Form and older webhook calls continue using `getTermsAndConditions(requestType)`
 when that field is absent.
+
+## O-PLUS quotation design (new PDF layout)
+
+Streamlit now renders the client PDF itself in the O-PLUS design (the layout of
+quotation 1778) and uses two existing webhook actions:
+
+1. `generateDocOnly` – creates the Google Doc and serial number. Streamlit sends
+   `shareDocForEdit: false`, `includeDocPdf: false`, `includeRoomPdfs: false`,
+   and the script now also returns `formattedDate`, `vatRate`, `subTotal` and
+   the final `items`.
+2. `uploadPdf` – saves the new-design PDF to the Drive PDF folder and logs the
+   quotation in the log sheet.
+
+After pulling this change, paste the updated `Code.gs` into the Apps Script
+project and deploy a **New version** of the existing Web App (same URL).
+Until then the old script still works, but it shares the Google Doc with
+"anyone with the link can edit".

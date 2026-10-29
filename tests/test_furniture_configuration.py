@@ -157,7 +157,6 @@ class FurnitureConfigurationTests(unittest.TestCase):
         for forbidden_text in (
             '"baseKey":',
             '"Base Key":',
-            "generateDocOnly",
             "roomBase64s",
             "missingRoomPdfs",
             "merge_pdf_base64",
@@ -171,7 +170,9 @@ class FurnitureConfigurationTests(unittest.TestCase):
             1,
         )
         self.assertEqual(len(furniture_export), 2)
-        self.assertIn('"action": "standard"', self.app_source)
+        self.assertIn("submit_official_quotation(payload)", self.app_source)
+        self.assertIn("includeRoomPdfs=False", self.app_source)
+        self.assertIn("payload.includeRoomPdfs === false", self.script_source)
         self.assertIn('payload.requestCategory || ""', self.script_source)
 
     def test_furniture_terms_use_generic_master_record(self):

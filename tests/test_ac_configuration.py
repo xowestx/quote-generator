@@ -381,7 +381,7 @@ class ACConfigurationTests(unittest.TestCase):
                 '{selected_request_type}")'
             ),
         )
-        self.assertIn('"action": "standard"', self.app_source)
+        self.assertIn("submit_official_quotation(payload)", self.app_source)
         self.assertIn('"Lookup Name": "A.C"', self.app_source)
         self.assertIn('payload["requestCategory"] = "A.C"', self.app_source)
         self.assertIn('payload["detailedScopeItems"]', self.app_source)

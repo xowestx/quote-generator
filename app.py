@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from fpdf import FPDF
 import re
 import requests
 import json
+import base64
+from zoneinfo import ZoneInfo
+
+from quotation_pdf import PaymentPlan, QuotationData, build_quotation_pdf
 
 from terms_engine import (
     apply_roof_room_contract_terms,
@@ -19,6 +22,160 @@ from roof_room_engine import (
     ROOF_ROOM_MOBILIZATION_DAYS,
     select_roof_room_scenarios,
 )
+
+# --------------------------------------------------------------------------
+# O-PLUS quotation PDF (new design, quotation 1778 layout)
+# --------------------------------------------------------------------------
+def cairo_date_text():
+    return datetime.now(ZoneInfo("Africa/Cairo")).strftime("%d-%b-%Y")
+
+
+def build_new_design_quotation_pdf(
+    *,
+    unit_id,
+    client_name,
+    request_type,
+    ref_no,
+    date_text,
+    items,
+    vat_rate,
+    terms_text,
+    terms_data,
+    detailed_scope_items=None,
+    show_scope_prices=True,
+    scope_label="",
+    append_pdfs=None,
+):
+    """Render the O-PLUS quotation from the generator's own data and payment plan."""
+    terms_data = terms_data or {}
+    due_event = terms_data.get("downPaymentDueEvent") or "Upon Approval"
+    if due_event == "Custom":
+        due_event = terms_data.get("customDownPaymentDueEvent") or "Upon Approval"
+    payment = PaymentPlan(
+        down_payment_percent=float(terms_data.get("downPaymentPercent", 100.0)),
+        due_event=str(due_event),
+        installment_count=int(terms_data.get("calculatedInstallmentCount") or 0),
+        installment_frequency=str(terms_data.get("installmentFrequency") or "monthly"),
+        payment_method=str(terms_data.get("paymentMethod") or ""),
+    )
+    data = QuotationData(
+        unit_id=str(unit_id or ""),
+        client_name=str(client_name or ""),
+        request_type=str(request_type or "Quotation"),
+        date_text=date_text,
+        ref_no=str(ref_no or ""),
+        items=[
+            {
+                "description": item.get("description", ""),
+                "unit": item.get("unit", ""),
+                "qty": item.get("qty", 0),
+                "rate": item.get("rate", 0),
+                "total": item.get("total"),
+            }
+            for item in items
+        ],
+        terms_text=terms_text or "",
+        payment=payment,
+        vat_rate=float(vat_rate),
+        detailed_scope_items=list(detailed_scope_items or []),
+        show_scope_prices=bool(show_scope_prices),
+        scope_label=scope_label,
+    )
+    return build_quotation_pdf(data, append_pdfs=append_pdfs)
+
+
+def scope_label_for(request_type):
+    if request_type == "Glass House":
+        return "Glass House Works"
+    if request_type == "A.C":
+        return "HVAC Works"
+    return ""
+
+
+def submit_official_quotation(payload, timeout=180):
+    """Create the quotation through Apps Script, rendered in the new design.
+
+    1. Apps Script ("generateDocOnly") creates the editable Google Doc and
+       issues the serial number, exactly as before.
+    2. The client PDF is rendered here in the O-PLUS design with the same
+       items, totals, terms and payment plan.
+    3. Apps Script ("uploadPdf") saves that PDF to the Drive PDF folder and
+       logs the quotation.
+    """
+    headers = {"Content-Type": "application/json"}
+    request_payload = dict(
+        payload,
+        action="generateDocOnly",
+        shareDocForEdit=False,
+        includeDocPdf=False,
+        includeRoomPdfs=False,
+    )
+    response = requests.post(
+        WEBHOOK_URL, data=json.dumps(request_payload), headers=headers, timeout=timeout
+    )
+    if response.status_code != 200:
+        return {
+            "status": "error",
+            "message": f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.",
+        }
+    result = response.json()
+    if result.get("status") != "success":
+        return result
+
+    category = str(payload.get("requestCategory") or "")
+    is_land_extension = "LAND EXTENSION" in str(payload.get("requestType", "")).upper()
+    vat_rate = result.get("vatRate")
+    if vat_rate is None:
+        vat_rate = 0.0 if is_land_extension else 0.14
+    serial_number = str(result.get("serialNumber") or "")
+    pdf_bytes = build_new_design_quotation_pdf(
+        unit_id=payload.get("unitId", ""),
+        client_name=payload.get("clientName", ""),
+        request_type=payload.get("requestType", ""),
+        ref_no=serial_number,
+        date_text=result.get("formattedDate") or cairo_date_text(),
+        items=result.get("items") or payload.get("items", []),
+        vat_rate=vat_rate,
+        terms_text=payload.get("generatedTermsAndConditions", ""),
+        terms_data=payload.get("quotationTermsOverrides", {}),
+        detailed_scope_items=payload.get("detailedScopeItems") or [],
+        show_scope_prices=payload.get("priceAttachedDetailedScope", True),
+        scope_label=scope_label_for(category),
+    )
+    pdf_name = (
+        result.get("docName")
+        or f"{payload.get('unitId', '')} - {serial_number} - {payload.get('requestType', '')}.pdf"
+    )
+    result["pdfBytes"] = pdf_bytes
+    result["pdfName"] = pdf_name
+    try:
+        upload = requests.post(
+            WEBHOOK_URL,
+            data=json.dumps({
+                "action": "uploadPdf",
+                "base64Pdf": base64.b64encode(pdf_bytes).decode("ascii"),
+                "docName": pdf_name,
+                "serialNumber": serial_number,
+                "unitId": payload.get("unitId", ""),
+                "clientName": payload.get("clientName", ""),
+                "requestType": payload.get("requestType", ""),
+                "requestCategory": category,
+                "grandTotal": result.get("grandTotal"),
+                "zone": payload.get("zone", ""),
+            }),
+            headers=headers,
+            timeout=timeout,
+        )
+        upload_data = upload.json() if upload.status_code == 200 else {}
+    except Exception as upload_error:
+        upload_data = {"status": "error", "message": str(upload_error)}
+    if upload_data.get("status") == "success":
+        result["pdfUrl"] = upload_data.get("pdfUrl")
+    else:
+        result["pdfUrl"] = None
+        result["uploadError"] = upload_data.get("message") or "PDF upload to Drive failed."
+    return result
+
 
 # Verified Room-by-Room Furniture Rate Mapping
 FURNITURE_RATES = {
@@ -693,6 +850,7 @@ st.set_page_config(page_title="O West Extra Works Configurator", layout="wide")
 
 if 'doc_url' not in st.session_state:
     st.session_state.doc_url = None
+    st.session_state.new_design_upload_error = None
 if 'pdf_url' not in st.session_state:
     st.session_state.pdf_url = None
 if 'ac_breakdown_doc_url' not in st.session_state:
@@ -709,6 +867,7 @@ if 'priced_breakdown_category' not in st.session_state:
 if st.sidebar.button("🔄 Hard Reset & Fetch Latest Data"):
     st.cache_data.clear()
     st.session_state.doc_url = None
+    st.session_state.new_design_upload_error = None
     st.session_state.pdf_url = None
     st.session_state.ac_breakdown_doc_url = None
     st.session_state.ac_breakdown_pdf_url = None
@@ -896,6 +1055,7 @@ if df_fact is not None and not df_fact.empty:
     if st.session_state.get('last_master_request') != selected_request_type:
         st.session_state.staged_items = []
         st.session_state.doc_url = None
+        st.session_state.new_design_upload_error = None
         st.session_state.pdf_url = None
         st.session_state.ac_breakdown_doc_url = None
         st.session_state.ac_breakdown_pdf_url = None
@@ -1353,7 +1513,6 @@ if df_fact is not None and not df_fact.empty:
                     for level_name in ("Rent", "Luxury"):
                         setup = batch_levels[level_name]
                         payload = {
-                            "action": "standard",
                             "unitId": unit_id,
                             "clientName": batch_client(unit_id),
                             "zone": zone,
@@ -1366,14 +1525,7 @@ if df_fact is not None and not df_fact.empty:
                             "items": batch_items(level_name, bedrooms_count),
                         }
                         try:
-                            response = requests.post(
-                                WEBHOOK_URL,
-                                data=json.dumps(payload),
-                                headers={"Content-Type": "application/json"},
-                                timeout=120,
-                            )
-                            response.raise_for_status()
-                            data = response.json()
+                            data = submit_official_quotation(payload)
                             success = data.get("status") == "success"
                             results.append({
                                 "Unit ID": unit_id,
@@ -3440,7 +3592,6 @@ if df_fact is not None and not df_fact.empty:
                             resolved_req_name = st.session_state.staged_items[0]['Lookup Name']
 
                         payload = {
-                            "action": "standard",
                             "unitId": selected_unit,
                             "clientName": final_client_name,
                             "zone": str(zone_name),
@@ -3497,184 +3648,102 @@ if df_fact is not None and not df_fact.empty:
                             )
                                 
                         try:
-                            headers = {"Content-Type": "application/json"}
-                            response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=headers)
-                            
-                            if response.status_code == 200:
-                                response_data = response.json()
-                                
-                                # Process standard quote
-                                if response_data.get("status") == "success":
-                                    st.success("✅ Quotation Generated Successfully!")
-                                    st.session_state.doc_url = response_data.get("docUrl")
-                                    st.session_state.pdf_url = response_data.get("pdfUrl")
-                                    st.session_state.ac_breakdown_doc_url = (
-                                        response_data.get("pricedBreakdownDocUrl")
-                                    )
-                                    st.session_state.ac_breakdown_pdf_url = (
-                                        response_data.get("pricedBreakdownPdfUrl")
-                                    )
-                                    st.session_state.priced_breakdown_doc_url = (
-                                        response_data.get("pricedBreakdownDocUrl")
-                                    )
-                                    st.session_state.priced_breakdown_pdf_url = (
-                                        response_data.get("pricedBreakdownPdfUrl")
-                                    )
-                                    st.session_state.priced_breakdown_category = (
-                                        selected_request_type
-                                        if response_data.get("pricedBreakdownDocUrl")
-                                        else None
-                                    )
-                                    st.rerun()
-                                else:
-                                    st.error(f"Apps Script Error: {response_data.get('message')}")
+                            response_data = submit_official_quotation(payload)
+                            if response_data.get("status") == "success":
+                                st.session_state.new_design_pdf = response_data.get("pdfBytes")
+                                st.session_state.new_design_pdf_name = response_data.get("pdfName")
+                                st.session_state.new_design_upload_error = response_data.get("uploadError")
+                                st.success("✅ Quotation Generated Successfully!")
+                                st.session_state.doc_url = response_data.get("docUrl")
+                                st.session_state.pdf_url = response_data.get("pdfUrl")
+                                st.session_state.ac_breakdown_doc_url = (
+                                    response_data.get("pricedBreakdownDocUrl")
+                                )
+                                st.session_state.ac_breakdown_pdf_url = (
+                                    response_data.get("pricedBreakdownPdfUrl")
+                                )
+                                st.session_state.priced_breakdown_doc_url = (
+                                    response_data.get("pricedBreakdownDocUrl")
+                                )
+                                st.session_state.priced_breakdown_pdf_url = (
+                                    response_data.get("pricedBreakdownPdfUrl")
+                                )
+                                st.session_state.priced_breakdown_category = (
+                                    selected_request_type
+                                    if response_data.get("pricedBreakdownDocUrl")
+                                    else None
+                                )
+                                st.rerun()
                             else:
-                                st.error(f"HTTP Error {response.status_code}: Failed to reach Google Apps Script.")
+                                st.error(f"Apps Script Error: {response_data.get('message')}")
                         except Exception as e:
                             st.error(f"Connection failed: {e}")
 
             with col_export2:
-                def pdf_safe_text(value):
-                    """Convert UI text safely for FPDF's built-in Latin-1 font."""
-                    text = str(value)
-                    replacements = {
-                        "–": "-",
-                        "—": "-",
-                        "‑": "-",
-                        "’": "'",
-                        "‘": "'",
-                        "“": '"',
-                        "”": '"',
-                        "…": "...",
-                        "•": "-",
-                        "\u00a0": " ",
+                preview_items = [
+                    {
+                        "description": item_row.get("Description", ""),
+                        "unit": item_row.get("Unit", ""),
+                        "qty": item_row.get("QTY", 0),
+                        "rate": item_row.get("Rate", 0),
+                        "total": item_row.get("Total Amount"),
                     }
-                    for source_character, replacement in replacements.items():
-                        text = text.replace(source_character, replacement)
-                    return text.encode(
-                        "latin-1",
-                        errors="replace",
-                    ).decode("latin-1")
-
-                pdf = FPDF()
-                pdf.add_page()
-                pdf.set_font("Helvetica", "B", 16)
-                pdf.cell(0, 10, "ORASCOM DEVELOPMENT - O WEST", ln=True, align="C")
-                pdf.set_font("Helvetica", "", 12)
-                pdf.cell(0, 10, f"Date generated: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-                pdf.cell(
-                    0,
-                    10,
-                    pdf_safe_text(f"Client Reference Name: {final_client_name}"),
-                    ln=True,
-                )
-                pdf.cell(
-                    0,
-                    10,
-                    pdf_safe_text(f"Unit ID Assignment: {selected_unit}"),
-                    ln=True,
-                )
-                
+                    for _, item_row in summary_df.iterrows()
+                ]
                 disp_req_name = selected_request_type
                 if selected_request_type in ["Roof Room", "Closing Double Height", "Furniture", "Glass House"] and 'Lookup Name' in st.session_state.staged_items[0]:
                     disp_req_name = st.session_state.staged_items[0]['Lookup Name']
-                pdf.cell(
-                    0,
-                    10,
-                    pdf_safe_text(f"Request Type: {disp_req_name}"),
-                    ln=True,
-                )
-                pdf.ln(8)
-                
-                pdf.set_font("Helvetica", "B", 10)
-                pdf.cell(10, 8, "No.", border=1, align="C")
-                pdf.cell(90, 8, "Description", border=1)
-                pdf.cell(15, 8, "Unit", border=1, align="C")
-                pdf.cell(15, 8, "QTY", border=1, align="C")
-                pdf.cell(30, 8, "Rate", border=1, align="C")
-                pdf.cell(30, 8, "Total", border=1, align="C", ln=True)
-                
-                pdf.set_font("Helvetica", "", 9)
-                for _, item_row in summary_df.iterrows():
-                    pdf.cell(
-                        10,
-                        8,
-                        pdf_safe_text(item_row.get('No.', '')),
-                        border=1,
-                        align="C",
-                    )
-                    pdf.cell(
-                        90,
-                        8,
-                        pdf_safe_text(item_row.get('Description', ''))[:45],
-                        border=1,
-                    )
-                    pdf.cell(
-                        15,
-                        8,
-                        pdf_safe_text(item_row.get('Unit', '')),
-                        border=1,
-                        align="C",
-                    )
-                    pdf.cell(
-                        15,
-                        8,
-                        pdf_safe_text(item_row.get('QTY', '')),
-                        border=1,
-                        align="C",
-                    )
-                    pdf.cell(30, 8, f"{item_row.get('Rate', 0):,.2f}", border=1, align="R")
-                    pdf.cell(30, 8, f"{item_row.get('Total Amount', 0):,.2f}", border=1, align="R", ln=True)
-                    
-                pdf.ln(6)
-                pdf.set_font("Helvetica", "B", 11)
-                
-                subtotal = summary_df['Total Amount'].sum()
-                vat = subtotal * 0.14
-                total_with_vat = subtotal + vat
-                
-                if selected_request_type == "Land Extension":
-                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
+                if selected_request_type == "A.C":
+                    preview_scope = st.session_state.get("ac_detailed_scope_items", [])
+                    preview_prices = st.session_state.get(f"attach_priced_ac_scope_{selected_unit}", False)
+                elif selected_request_type == "Glass House":
+                    preview_scope = st.session_state.get("glass_house_detailed_scope_items", [])
+                    preview_prices = st.session_state.get(f"attach_priced_glass_house_scope_{selected_unit}", False)
                 else:
-                    pdf.cell(0, 8, f"Total Value: {subtotal:,.2f} EGP", ln=True)
-                    pdf.cell(0, 8, f"Total Value (Including 14% VAT): {total_with_vat:,.2f} EGP", ln=True)
-                pdf.ln(4)
-                
-                final_terms_text = st.session_state.get(
-                    "generated_terms_and_conditions", ""
-                )
-                if final_terms_text:
-                    pdf.set_font("Helvetica", "B", 11)
-                    pdf.cell(0, 8, "Terms & Conditions:", ln=True)
-                    pdf.set_font("Helvetica", "", 8)
+                    preview_scope, preview_prices = [], True
+                compiled_pdf_payload = b""
+                if st.session_state.get("terms_valid", False):
+                    try:
+                        compiled_pdf_payload = build_new_design_quotation_pdf(
+                            unit_id=selected_unit,
+                            client_name=final_client_name,
+                            request_type=disp_req_name,
+                            ref_no="DRAFT",
+                            date_text=cairo_date_text(),
+                            items=preview_items,
+                            vat_rate=0.0 if selected_request_type == "Land Extension" else 0.14,
+                            terms_text=st.session_state.get("generated_terms_and_conditions", ""),
+                            terms_data=st.session_state.get("quotation_terms_data", {}),
+                            detailed_scope_items=preview_scope,
+                            show_scope_prices=bool(preview_prices),
+                            scope_label=scope_label_for(selected_request_type),
+                        )
+                    except Exception as preview_error:
+                        st.error(f"Draft preview failed: {preview_error}")
 
-                    for term_line in final_terms_text.splitlines():
-                        if term_line.strip():
-                            # Reset the cursor after prior cells/multi-cells so fpdf has
-                            # the full printable width available for every terms line.
-                            pdf.set_x(pdf.l_margin)
-                            pdf.multi_cell(0, 4, pdf_safe_text(term_line.strip()))
-                    pdf.ln(2)
-                
-                try:
-                    pdf_out = pdf.output(dest="S")
-                    if isinstance(pdf_out, str):
-                        compiled_pdf_payload = pdf_out.encode("latin-1", errors="ignore")
-                    else:
-                        compiled_pdf_payload = bytes(pdf_out)
-                except AttributeError:
-                    compiled_pdf_payload = bytes(pdf.output(dest="S"))
-                
                 st.download_button(
-                    label="📄 Download Quick PDF Preview",
+                    label="📄 Download Draft PDF Preview",
                     data=compiled_pdf_payload,
-                    file_name=f"O_West_Proposal_{final_client_name.replace(' ', '_')}.pdf",
+                    file_name=f"O_West_Proposal_{final_client_name.replace(' ', '_')}_DRAFT.pdf",
                     mime="application/pdf",
                     use_container_width=True,
-                    disabled=not st.session_state.get("terms_valid", False),
+                    disabled=not compiled_pdf_payload,
                 )
 
             # Document Hub Display
+            if st.session_state.get("new_design_upload_error") and st.session_state.get("new_design_pdf"):
+                st.warning(
+                    "The quotation PDF could not be saved to Drive "
+                    f"({st.session_state.new_design_upload_error}). Download it here instead."
+                )
+                st.download_button(
+                    "💾 Download Quotation PDF",
+                    data=st.session_state.new_design_pdf,
+                    file_name=st.session_state.get("new_design_pdf_name") or "quotation.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+
             if st.session_state.doc_url and st.session_state.pdf_url:
                 st.markdown("### 📥 Generated Proposal Documents")
                 st.success("Files successfully compiled inside Google Workspace!")

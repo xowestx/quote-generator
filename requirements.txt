@@ -3,3 +3,4 @@ pandas
 requests
 fpdf2
 pypdf
+reportlab>=4.0

@@ -1103,7 +1103,8 @@ function doPost(e) {
       const roomBase64s = [];
       const missingRoomPdfs = [];
       
-      payload.items.forEach(item => {
+      const roomItems = payload.includeRoomPdfs === false ? [] : payload.items;
+      roomItems.forEach(item => {
         const descUpper = String(item.description).toUpperCase();
         const exactBaseKey = String(item.baseKey || "").toUpperCase().trim();
         let searchName = "";
@@ -1144,14 +1145,30 @@ function doPost(e) {
         }
       });
       
-      try { docCopy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT); } catch(e){}
-      const docBase64 = Utilities.base64Encode(docCopy.getAs('application/pdf').getBytes());
+      // Streamlit renders the client PDF (O-PLUS design) and sends it back via
+      // "uploadPdf". The Google Doc stays private unless a caller asks otherwise.
+      if (payload.shareDocForEdit === true || (isFurniture && payload.shareDocForEdit !== false)) {
+        try { docCopy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT); } catch(e){}
+      }
+      const docBase64 = payload.includeDocPdf === false
+        ? null
+        : Utilities.base64Encode(docCopy.getAs('application/pdf').getBytes());
       
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         docUrl: docUrl,
         docName: `${docName}.pdf`,
         docBase64: docBase64,
+        formattedDate: formattedDate,
+        vatRate: vatRate,
+        subTotal: subTotal,
+        items: formattedItems.map(item => ({
+          description: item.description,
+          unit: item.unit,
+          qty: item.qty,
+          rate: item.rate,
+          total: item.total
+        })),
         roomBase64s: roomBase64s,
         missingRoomPdfs: missingRoomPdfs,
         serialNumber: serialNumber,
